@@ -1,0 +1,32 @@
+# Entorno virtual
+.venv/
+venv/
+env/
+
+# Variables de entorno (secretos)
+.env
+*.env
+.env.example
+
+# Cache de Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# Bases de datos locales
+*.sqlite3
+*.db
+
+# Archivos subidos por usuarios (imágenes de productos y banners)
+uploads/
+
+# Logs
+*.log
+
+# IDE
+.vscode/
+.idea/
+README.md
+
