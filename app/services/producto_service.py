@@ -106,16 +106,47 @@ class ProductoService:
         self,
         search: Optional[str] = None,
         categoria: Optional[int] = None,
+        marca: Optional[str] = None,
         proveedor: Optional[int] = None,
         estado: Optional[str] = None,
     ) -> Sequence[Producto]:
-        """Lista productos con filtros opcionales combinables."""
+        """Lista TODOS los productos con filtros opcionales combinables."""
         return self.repository.get_all(
             search=search,
             categoria_id=categoria,
+            marca=marca,
             proveedor_id=proveedor,
             estado=estado,
         )
+
+    def list_paginated(
+        self,
+        page: int,
+        page_size: int,
+        search: Optional[str] = None,
+        categoria: Optional[int] = None,
+        marca: Optional[str] = None,
+        proveedor: Optional[int] = None,
+        estado: Optional[str] = None,
+    ) -> tuple[Sequence[Producto], int]:
+        """
+        Devuelve una página de productos (filtros combinables) y el total de
+        coincidencias. Pensado para el panel admin: filtra por categoría y
+        marca y pagina de a `page_size` (por defecto 10).
+        """
+        return self.repository.get_paginated(
+            page=page,
+            page_size=page_size,
+            search=search,
+            categoria_id=categoria,
+            marca=marca,
+            proveedor_id=proveedor,
+            estado=estado,
+        )
+
+    def marcas(self, categoria: Optional[int] = None) -> Sequence[str]:
+        """Marcas distintas (opcionalmente de una categoría) para el filtro."""
+        return self.repository.marcas(categoria_id=categoria)
 
     def search(self, termino: str) -> Sequence[Producto]:
         """Búsqueda por nombre, código o marca (coincidencia parcial)."""

@@ -19,33 +19,43 @@ class TestCatalogoAcceso:
     def test_con_api_key_funciona(self, client, catalog_headers, seed):
         r = client.get("/catalogo/productos", headers=catalog_headers)
         assert r.status_code == 200
-        assert isinstance(r.json(), list)
+        body = r.json()
+        assert isinstance(body["items"], list)
 
 
 class TestCatalogoProductos:
     """Listado y filtrado de productos."""
 
     def test_devuelve_productos(self, client, catalog_headers, seed):
-        prods = client.get("/catalogo/productos", headers=catalog_headers).json()
-        assert len(prods) >= 3  # los 3 del seed
+        body = client.get("/catalogo/productos", headers=catalog_headers).json()
+        assert body["total"] >= 3  # los 3 del seed
+        assert len(body["items"]) >= 3
         # Cada producto tiene los campos del catálogo
-        p = prods[0]
+        p = body["items"][0]
         for campo in ("id", "nombre", "marca", "categoria", "precio_venta", "estado", "destacado"):
             assert campo in p, f"Falta el campo '{campo}'"
 
+    def test_paginacion(self, client, catalog_headers, seed):
+        """Respeta page_size y expone los metadatos de paginación."""
+        body = client.get("/catalogo/productos", params={"page_size": 2}, headers=catalog_headers).json()
+        assert len(body["items"]) <= 2
+        assert body["page"] == 1
+        assert body["page_size"] == 2
+        assert body["total_pages"] >= 1
+
     def test_incluye_descripcion_y_ficha(self, client, catalog_headers, seed):
         """El catálogo expone descripción y ficha técnica."""
-        prods = client.get("/catalogo/productos", headers=catalog_headers).json()
-        assert "descripcion" in prods[0]
-        assert "ficha_tecnica" in prods[0]
+        body = client.get("/catalogo/productos", headers=catalog_headers).json()
+        assert "descripcion" in body["items"][0]
+        assert "ficha_tecnica" in body["items"][0]
 
     def test_filtro_por_categoria(self, client, catalog_headers, seed):
         cat_id = seed["categoria"]["id"]
-        prods = client.get("/catalogo/productos", params={"categoria_id": cat_id}, headers=catalog_headers).json()
+        prods = client.get("/catalogo/productos", params={"categoria_id": cat_id}, headers=catalog_headers).json()["items"]
         assert all(p["categoria"] == "Señuelos" for p in prods)
 
     def test_filtro_por_marca(self, client, catalog_headers, seed):
-        prods = client.get("/catalogo/productos", params={"marca": "Rapala"}, headers=catalog_headers).json()
+        prods = client.get("/catalogo/productos", params={"marca": "Rapala"}, headers=catalog_headers).json()["items"]
         assert all(p["marca"] == "Rapala" for p in prods)
 
     def test_filtro_categoria_mas_marca(self, client, catalog_headers, seed):
@@ -53,16 +63,17 @@ class TestCatalogoProductos:
         cat_id = seed["categoria"]["id"]
         prods = client.get("/catalogo/productos", params={
             "categoria_id": cat_id, "marca": "Rapala"
-        }, headers=catalog_headers).json()
+        }, headers=catalog_headers).json()["items"]
         assert all(p["marca"] == "Rapala" and p["categoria"] == "Señuelos" for p in prods)
 
     def test_busqueda_por_texto(self, client, catalog_headers, seed):
-        prods = client.get("/catalogo/productos", params={"search": "rapala"}, headers=catalog_headers).json()
+        prods = client.get("/catalogo/productos", params={"search": "rapala"}, headers=catalog_headers).json()["items"]
         assert any("Rapala" in p["nombre"] or p["marca"] == "Rapala" for p in prods)
 
     def test_busqueda_sin_resultados(self, client, catalog_headers, seed):
-        prods = client.get("/catalogo/productos", params={"search": "xyznoexiste"}, headers=catalog_headers).json()
-        assert prods == []
+        body = client.get("/catalogo/productos", params={"search": "xyznoexiste"}, headers=catalog_headers).json()
+        assert body["items"] == []
+        assert body["total"] == 0
 
 
 class TestCatalogoDestacados:
@@ -72,13 +83,13 @@ class TestCatalogoDestacados:
         # Marcar uno como destacado
         p = seed["disponible"]
         client.put(f"/productos/{p['id']}/destacado", params={"destacado": True}, headers=auth)
-        prods = client.get("/catalogo/productos", params={"solo_destacados": True}, headers=catalog_headers).json()
+        prods = client.get("/catalogo/productos", params={"solo_destacados": True}, headers=catalog_headers).json()["items"]
         assert len(prods) >= 1
         assert all(p["destacado"] for p in prods)
 
     def test_destacados_primero_en_orden(self, client, catalog_headers, seed):
         """Los destacados aparecen antes que los no destacados."""
-        prods = client.get("/catalogo/productos", headers=catalog_headers).json()
+        prods = client.get("/catalogo/productos", headers=catalog_headers).json()["items"]
         if len(prods) >= 2:
             # Buscar el primer no-destacado
             primer_no_dest = next((i for i, p in enumerate(prods) if not p["destacado"]), len(prods))

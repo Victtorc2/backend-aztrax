@@ -21,9 +21,40 @@ from fastapi.testclient import TestClient
 from app.main import app
 
 
+def _reset_db_con_admin() -> None:
+    """
+    Deja la BD de test en un estado limpio y reproducible:
+    recrea TODO el esquema y siembra el usuario admin que usan los fixtures.
+
+    Necesario porque la BD de test es un archivo SQLite que persiste entre
+    corridas; sin esto, datos de una sesión anterior (p. ej. la categoría
+    "Señuelos") harían fallar el seed con errores de duplicado.
+    """
+    # Importar todos los modelos para que se registren en Base.metadata.
+    from app.models import (  # noqa: F401
+        banner, categoria, cliente, producto, proveedor, user, venta,
+    )
+    from app.core.security import hash_password
+    from app.db.base import Base
+    from app.db.session import SessionLocal, engine
+    from app.repositories.user_repository import UserRepository
+
+    Base.metadata.drop_all(bind=engine)
+    Base.metadata.create_all(bind=engine)
+
+    db = SessionLocal()
+    try:
+        repo = UserRepository(db)
+        if not repo.exists_by_email("admin@sistema.com"):
+            repo.create("Admin", "admin@sistema.com", hash_password("admin123"))
+    finally:
+        db.close()
+
+
 @pytest.fixture(scope="session")
 def client():
-    """TestClient que vive toda la sesión de tests."""
+    """TestClient que vive toda la sesión de tests (con BD limpia y admin)."""
+    _reset_db_con_admin()
     with TestClient(app) as c:
         yield c
 

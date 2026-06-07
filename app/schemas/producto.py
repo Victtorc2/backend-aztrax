@@ -164,6 +164,39 @@ class ProductoResponse(BaseModel):
         )
 
 
+class ProductosPaginados(BaseModel):
+    """
+    Página de productos con metadatos de paginación.
+
+    El panel de administración usa `total` y `total_pages` para dibujar los
+    controles de paginación (10 productos por página por defecto).
+    """
+
+    items: list[ProductoResponse]
+    total: int           # total de productos que cumplen los filtros (sin paginar)
+    page: int            # página actual (1-indexada)
+    page_size: int       # tamaño de página
+    total_pages: int     # número total de páginas
+
+    @classmethod
+    def build(
+        cls,
+        productos: "list[Producto]",
+        total: int,
+        page: int,
+        page_size: int,
+    ) -> "ProductosPaginados":
+        """Construye la respuesta paginada calculando el número de páginas."""
+        total_pages = (total + page_size - 1) // page_size if page_size else 0
+        return cls(
+            items=[ProductoResponse.from_producto(p) for p in productos],
+            total=total,
+            page=page,
+            page_size=page_size,
+            total_pages=total_pages,
+        )
+
+
 class ProductoPorPedirResponse(BaseModel):
     """
     Proyección de un producto para el módulo de reposición ("por pedir").

@@ -35,7 +35,12 @@ class TestProductoCRUD:
     def test_listar_productos(self, client, auth, seed):
         r = client.get("/productos", headers=auth)
         assert r.status_code == 200
-        assert len(r.json()) >= 3
+        body = r.json()
+        # Respuesta paginada: items + metadatos
+        assert body["total"] >= 3
+        assert len(body["items"]) >= 3
+        assert body["page"] == 1
+        assert body["page_size"] == 10
 
     def test_obtener_producto(self, client, auth, seed):
         p = seed["disponible"]
@@ -76,6 +81,59 @@ class TestProductoCRUD:
         }, headers=auth).json()
         r = client.delete(f"/productos/{p['id']}", headers=auth)
         assert r.status_code in (200, 204)
+
+
+class TestProductoFiltrosPaginacion:
+    """Filtro encadenado categoría → marca y paginación del panel admin."""
+
+    def test_filtro_por_marca(self, client, auth, seed):
+        r = client.get("/productos", params={"marca": "Rapala"}, headers=auth)
+        assert r.status_code == 200
+        items = r.json()["items"]
+        assert len(items) >= 1
+        assert all(p["marca"] == "Rapala" for p in items)
+
+    def test_filtro_categoria_mas_marca(self, client, auth, seed):
+        """Filtro encadenado: categoría + marca (lo que pide el panel)."""
+        cat_id = seed["categoria"]["id"]
+        r = client.get(
+            "/productos",
+            params={"categoria": cat_id, "marca": "Storm"},
+            headers=auth,
+        )
+        assert r.status_code == 200
+        items = r.json()["items"]
+        assert all(p["marca"] == "Storm" and p["categoria"] == "Señuelos" for p in items)
+
+    def test_paginacion_respeta_page_size(self, client, auth, seed):
+        r = client.get("/productos", params={"page_size": 2}, headers=auth)
+        assert r.status_code == 200
+        body = r.json()
+        assert len(body["items"]) <= 2
+        assert body["page_size"] == 2
+        assert body["total_pages"] >= 1
+
+    def test_paginas_no_se_solapan(self, client, auth, seed):
+        """La página 1 y la 2 devuelven productos distintos."""
+        p1 = client.get("/productos", params={"page": 1, "page_size": 1}, headers=auth).json()
+        p2 = client.get("/productos", params={"page": 2, "page_size": 1}, headers=auth).json()
+        if p1["total"] >= 2:
+            assert p1["items"][0]["id"] != p2["items"][0]["id"]
+
+    def test_pagina_invalida_rechaza(self, client, auth, seed):
+        assert client.get("/productos", params={"page": 0}, headers=auth).status_code == 422
+
+    def test_listar_marcas(self, client, auth, seed):
+        r = client.get("/productos/marcas", headers=auth)
+        assert r.status_code == 200
+        marcas = r.json()
+        assert "Rapala" in marcas and "Storm" in marcas
+
+    def test_marcas_por_categoria(self, client, auth, seed):
+        cat_id = seed["categoria"]["id"]
+        r = client.get("/productos/marcas", params={"categoria": cat_id}, headers=auth)
+        assert r.status_code == 200
+        assert "Rapala" in r.json()
 
 
 class TestProductoDestacado:

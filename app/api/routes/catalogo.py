@@ -22,6 +22,7 @@ from app.schemas.catalogo import (
     CatalogoCategoriaResponse,
     CatalogoMarcaResponse,
     CatalogoProducto,
+    CatalogoProductosPaginados,
 )
 
 router = APIRouter(
@@ -33,8 +34,8 @@ router = APIRouter(
 
 @router.get(
     "/productos",
-    response_model=list[CatalogoProducto],
-    summary="Lista de productos para el catálogo público",
+    response_model=CatalogoProductosPaginados,
+    summary="Lista paginada de productos para el catálogo público",
 )
 def listar_productos_catalogo(
     db: Annotated[Session, Depends(get_db)],
@@ -42,34 +43,49 @@ def listar_productos_catalogo(
     marca: Annotated[Optional[str], Query(description="Filtrar por marca exacta")] = None,
     search: Annotated[Optional[str], Query(description="Buscar por nombre, marca o modelo")] = None,
     solo_destacados: Annotated[bool, Query(description="Solo productos destacados")] = False,
-) -> list[CatalogoProducto]:
+    page: Annotated[int, Query(ge=1, description="Número de página (1-indexada)")] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100, description="Productos por página")] = 10,
+) -> CatalogoProductosPaginados:
     """
-    Devuelve todos los productos activos (incluidos los agotados, marcados
-    como 'No disponible'). Filtros opcionales: categoría, marca, búsqueda y
+    Devuelve los productos activos (incluidos los agotados) paginados, por
+    defecto 10 por página. Filtros opcionales: categoría, marca, búsqueda y
     destacados. Los destacados se ordenan primero.
+
+    Devuelve un objeto con `items` y los metadatos `total`, `page`,
+    `page_size` y `total_pages`.
     """
-    stmt = (
+    # Filtros comunes, aplicados tanto al conteo como a la página de datos.
+    def aplicar_filtros(stmt):
+        if categoria_id is not None:
+            stmt = stmt.where(Producto.categoria_id == categoria_id)
+        if marca and marca.strip():
+            stmt = stmt.where(Producto.marca == marca.strip())
+        if solo_destacados:
+            stmt = stmt.where(Producto.destacado.is_(True))
+        if search and search.strip():
+            pattern = f"%{search.strip().lower()}%"
+            stmt = stmt.where(
+                func.lower(Producto.nombre).like(pattern)
+                | func.lower(Producto.marca).like(pattern)
+                | func.lower(Producto.modelo).like(pattern)
+            )
+        return stmt
+
+    # Total de coincidencias (sin paginar) para calcular el número de páginas.
+    total = db.scalar(
+        aplicar_filtros(
+            select(func.count(Producto.id)).where(Producto.is_active.is_(True))
+        )
+    ) or 0
+
+    stmt = aplicar_filtros(
         select(Producto)
         .where(Producto.is_active.is_(True))
         .order_by(Producto.destacado.desc(), Producto.nombre.asc())
-    )
-
-    if categoria_id is not None:
-        stmt = stmt.where(Producto.categoria_id == categoria_id)
-    if marca and marca.strip():
-        stmt = stmt.where(Producto.marca == marca.strip())
-    if solo_destacados:
-        stmt = stmt.where(Producto.destacado.is_(True))
-    if search and search.strip():
-        pattern = f"%{search.strip().lower()}%"
-        stmt = stmt.where(
-            func.lower(Producto.nombre).like(pattern)
-            | func.lower(Producto.marca).like(pattern)
-            | func.lower(Producto.modelo).like(pattern)
-        )
+    ).offset((page - 1) * page_size).limit(page_size)
 
     productos = db.scalars(stmt).all()
-    return [
+    items = [
         CatalogoProducto(
             id=p.id, codigo=p.codigo, nombre=p.nombre, marca=p.marca,
             modelo=p.modelo, categoria=p.categoria.nombre, precio_venta=p.precio_venta,
@@ -78,6 +94,10 @@ def listar_productos_catalogo(
         )
         for p in productos
     ]
+    total_pages = (total + page_size - 1) // page_size if page_size else 0
+    return CatalogoProductosPaginados(
+        items=items, total=total, page=page, page_size=page_size, total_pages=total_pages,
+    )
 
 
 @router.get(

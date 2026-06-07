@@ -24,6 +24,7 @@ from app.dependencies.auth import CurrentUser, get_current_user
 from app.schemas.producto import (
     ProductoCreate,
     ProductoResponse,
+    ProductosPaginados,
     ProductoUpdate,
 )
 from app.services.producto_service import ProductoService
@@ -62,9 +63,9 @@ def crear_producto(
 
 @router.get(
     "",
-    response_model=list[ProductoResponse],
+    response_model=ProductosPaginados,
     status_code=status.HTTP_200_OK,
-    summary="Listar productos (con filtros opcionales)",
+    summary="Listar productos paginados (con filtros opcionales)",
 )
 def listar_productos(
     db: Annotated[Session, Depends(get_db)],
@@ -75,29 +76,46 @@ def listar_productos(
     categoria: Annotated[
         Optional[int], Query(description="Filtrar por id de categoría")
     ] = None,
+    marca: Annotated[
+        Optional[str], Query(description="Filtrar por marca exacta")
+    ] = None,
     proveedor: Annotated[
         Optional[int], Query(description="Filtrar por id de proveedor")
     ] = None,
     estado: Annotated[
         Optional[EstadoProducto], Query(description="Filtrar por estado")
     ] = None,
-) -> list[ProductoResponse]:
+    page: Annotated[int, Query(ge=1, description="Número de página (1-indexada)")] = 1,
+    page_size: Annotated[
+        int, Query(ge=1, le=100, description="Productos por página")
+    ] = 10,
+) -> ProductosPaginados:
     """
-    Lista los productos activos ordenados por fecha descendente.
+    Lista los productos activos paginados (por defecto 10 por página),
+    ordenados por fecha descendente.
 
-    Filtros combinables:
-    - `?search=coca` (por nombre o marca)
+    Filtros combinables (pensados para el filtro encadenado del panel admin
+    categoría → marca):
     - `?categoria=1`
+    - `?marca=Rapala`
+    - `?search=coca` (por nombre, marca o modelo)
     - `?proveedor=2`
     - `?estado=agotado`
+    - `?page=2&page_size=10`
+
+    Devuelve un objeto con `items` y los metadatos `total`, `page`,
+    `page_size` y `total_pages`.
     """
-    productos = ProductoService(db).list(
+    productos, total = ProductoService(db).list_paginated(
+        page=page,
+        page_size=page_size,
         search=search,
         categoria=categoria,
+        marca=marca,
         proveedor=proveedor,
         estado=estado.value if estado else None,
     )
-    return [ProductoResponse.from_producto(p) for p in productos]
+    return ProductosPaginados.build(list(productos), total, page, page_size)
 
 
 @router.get(
@@ -119,6 +137,31 @@ def buscar_productos(
     """
     productos = ProductoService(db).search(q)
     return [ProductoResponse.from_producto(p) for p in productos]
+
+
+@router.get(
+    "/marcas",
+    response_model=list[str],
+    status_code=status.HTTP_200_OK,
+    summary="Listar marcas distintas (opcionalmente por categoría)",
+)
+def listar_marcas(
+    db: Annotated[Session, Depends(get_db)],
+    _: CurrentUser,
+    categoria: Annotated[
+        Optional[int],
+        Query(description="Filtrar marcas de una categoría (filtro encadenado)"),
+    ] = None,
+) -> list[str]:
+    """
+    Devuelve las marcas distintas de los productos activos, ordenadas
+    alfabéticamente.
+
+    Para el filtro encadenado del panel admin: tras elegir una categoría se
+    llama a `GET /productos/marcas?categoria=1` para poblar el selector de
+    marcas con solo las marcas de esa categoría.
+    """
+    return list(ProductoService(db).marcas(categoria=categoria))
 
 
 @router.get(

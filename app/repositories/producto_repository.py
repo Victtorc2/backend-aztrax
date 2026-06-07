@@ -11,8 +11,9 @@ Encapsula TODO el acceso a datos de la tabla `productos`. Aplica:
 from decimal import Decimal
 from typing import Any, Optional, Sequence
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.sql import Select
 
 from app.models.producto import Producto
 from app.utils.productos import generate_product_code
@@ -64,30 +65,26 @@ class ProductoRepository:
         )
         return self.db.scalar(stmt)
 
-    def get_all(
+    def _aplicar_filtros(
         self,
+        stmt: Select,
         search: Optional[str] = None,
         categoria_id: Optional[int] = None,
+        marca: Optional[str] = None,
         proveedor_id: Optional[int] = None,
         estado: Optional[str] = None,
-    ) -> Sequence[Producto]:
+    ) -> Select:
         """
-        Lista productos activos aplicando filtros opcionales combinables.
+        Aplica los filtros comunes (compartidos por el listado, el paginado y
+        el conteo) sobre una consulta que ya restringe a productos activos.
 
         Filtros:
-            search: coincidencia parcial por nombre o marca (case-insensitive).
+            search: coincidencia parcial por nombre, marca o modelo.
             categoria_id: filtra por categoría.
+            marca: filtra por marca EXACTA (case-insensitive).
             proveedor_id: filtra por proveedor.
             estado: filtra por estado exacto.
-
-        Orden: fecha de creación descendente (con id como desempate estable).
         """
-        stmt = (
-            select(Producto)
-            .where(Producto.is_active.is_(True))
-            .options(*self._eager())
-        )
-
         if search and search.strip():
             patron = f"%{search.strip().lower()}%"
             stmt = stmt.where(
@@ -99,12 +96,94 @@ class ProductoRepository:
             )
         if categoria_id is not None:
             stmt = stmt.where(Producto.categoria_id == categoria_id)
+        if marca and marca.strip():
+            stmt = stmt.where(func.lower(Producto.marca) == marca.strip().lower())
         if proveedor_id is not None:
             stmt = stmt.where(Producto.proveedor_id == proveedor_id)
         if estado is not None:
             stmt = stmt.where(Producto.estado == estado)
+        return stmt
 
+    def get_all(
+        self,
+        search: Optional[str] = None,
+        categoria_id: Optional[int] = None,
+        marca: Optional[str] = None,
+        proveedor_id: Optional[int] = None,
+        estado: Optional[str] = None,
+    ) -> Sequence[Producto]:
+        """
+        Lista TODOS los productos activos que cumplen los filtros (sin paginar).
+
+        Se usa, por ejemplo, para el reporte PDF, que necesita el inventario
+        completo. Orden: fecha de creación descendente (id como desempate).
+        """
+        stmt = (
+            select(Producto)
+            .where(Producto.is_active.is_(True))
+            .options(*self._eager())
+        )
+        stmt = self._aplicar_filtros(
+            stmt, search, categoria_id, marca, proveedor_id, estado
+        )
         stmt = stmt.order_by(Producto.created_at.desc(), Producto.id.desc())
+        return self.db.scalars(stmt).all()
+
+    def get_paginated(
+        self,
+        page: int,
+        page_size: int,
+        search: Optional[str] = None,
+        categoria_id: Optional[int] = None,
+        marca: Optional[str] = None,
+        proveedor_id: Optional[int] = None,
+        estado: Optional[str] = None,
+    ) -> tuple[Sequence[Producto], int]:
+        """
+        Devuelve una PÁGINA de productos activos junto con el total de
+        coincidencias (para que el cliente calcule el número de páginas).
+
+        Returns:
+            (items, total): la lista de la página y el total sin paginar.
+        """
+        # Total de coincidencias: se cuenta sobre los mismos filtros, sin
+        # ordenar ni cargar relaciones (más barato).
+        count_stmt = self._aplicar_filtros(
+            select(func.count(Producto.id)).where(Producto.is_active.is_(True)),
+            search, categoria_id, marca, proveedor_id, estado,
+        )
+        total = self.db.scalar(count_stmt) or 0
+
+        stmt = (
+            select(Producto)
+            .where(Producto.is_active.is_(True))
+            .options(*self._eager())
+        )
+        stmt = self._aplicar_filtros(
+            stmt, search, categoria_id, marca, proveedor_id, estado
+        )
+        stmt = (
+            stmt.order_by(Producto.created_at.desc(), Producto.id.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+        items = self.db.scalars(stmt).all()
+        return items, total
+
+    def marcas(self, categoria_id: Optional[int] = None) -> Sequence[str]:
+        """
+        Devuelve las marcas distintas de los productos activos, ordenadas
+        alfabéticamente. Si se pasa `categoria_id`, solo las de esa categoría
+        (para el filtro encadenado categoría → marca del panel admin).
+        """
+        stmt = (
+            select(Producto.marca)
+            .where(Producto.is_active.is_(True))
+            .group_by(Producto.marca)
+            .order_by(Producto.marca.asc())
+        )
+        if categoria_id is not None:
+            stmt = stmt.where(Producto.categoria_id == categoria_id)
         return self.db.scalars(stmt).all()
 
     def search(self, termino: str) -> Sequence[Producto]:

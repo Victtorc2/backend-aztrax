@@ -31,6 +31,16 @@ class CatalogoProducto(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class CatalogoProductosPaginados(BaseModel):
+    """Página de productos del catálogo con metadatos de paginación."""
+
+    items: list[CatalogoProducto]
+    total: int           # total de productos que cumplen los filtros (sin paginar)
+    page: int            # página actual (1-indexada)
+    page_size: int       # tamaño de página
+    total_pages: int     # número total de páginas
+
+
 class CatalogoCategoriaResponse(BaseModel):
     """Categoría para el filtro del catálogo."""
 
