@@ -73,6 +73,7 @@ class ProductoRepository:
         marca: Optional[str] = None,
         proveedor_id: Optional[int] = None,
         estado: Optional[str] = None,
+        destacado: Optional[bool] = None,
     ) -> Select:
         """
         Aplica los filtros comunes (compartidos por el listado, el paginado y
@@ -84,6 +85,7 @@ class ProductoRepository:
             marca: filtra por marca EXACTA (case-insensitive).
             proveedor_id: filtra por proveedor.
             estado: filtra por estado exacto.
+            destacado: filtra por productos destacados (True) o no (False).
         """
         if search and search.strip():
             patron = f"%{search.strip().lower()}%"
@@ -102,6 +104,8 @@ class ProductoRepository:
             stmt = stmt.where(Producto.proveedor_id == proveedor_id)
         if estado is not None:
             stmt = stmt.where(Producto.estado == estado)
+        if destacado is not None:
+            stmt = stmt.where(Producto.destacado.is_(destacado))
         return stmt
 
     def get_all(
@@ -111,6 +115,7 @@ class ProductoRepository:
         marca: Optional[str] = None,
         proveedor_id: Optional[int] = None,
         estado: Optional[str] = None,
+        destacado: Optional[bool] = None,
     ) -> Sequence[Producto]:
         """
         Lista TODOS los productos activos que cumplen los filtros (sin paginar).
@@ -124,7 +129,7 @@ class ProductoRepository:
             .options(*self._eager())
         )
         stmt = self._aplicar_filtros(
-            stmt, search, categoria_id, marca, proveedor_id, estado
+            stmt, search, categoria_id, marca, proveedor_id, estado, destacado
         )
         stmt = stmt.order_by(Producto.created_at.desc(), Producto.id.desc())
         return self.db.scalars(stmt).all()
@@ -138,6 +143,7 @@ class ProductoRepository:
         marca: Optional[str] = None,
         proveedor_id: Optional[int] = None,
         estado: Optional[str] = None,
+        destacado: Optional[bool] = None,
     ) -> tuple[Sequence[Producto], int]:
         """
         Devuelve una PÁGINA de productos activos junto con el total de
@@ -150,7 +156,7 @@ class ProductoRepository:
         # ordenar ni cargar relaciones (más barato).
         count_stmt = self._aplicar_filtros(
             select(func.count(Producto.id)).where(Producto.is_active.is_(True)),
-            search, categoria_id, marca, proveedor_id, estado,
+            search, categoria_id, marca, proveedor_id, estado, destacado,
         )
         total = self.db.scalar(count_stmt) or 0
 
@@ -160,7 +166,7 @@ class ProductoRepository:
             .options(*self._eager())
         )
         stmt = self._aplicar_filtros(
-            stmt, search, categoria_id, marca, proveedor_id, estado
+            stmt, search, categoria_id, marca, proveedor_id, estado, destacado
         )
         stmt = (
             stmt.order_by(Producto.created_at.desc(), Producto.id.desc())

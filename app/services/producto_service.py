@@ -109,6 +109,7 @@ class ProductoService:
         marca: Optional[str] = None,
         proveedor: Optional[int] = None,
         estado: Optional[str] = None,
+        destacado: Optional[bool] = None,
     ) -> Sequence[Producto]:
         """Lista TODOS los productos con filtros opcionales combinables."""
         return self.repository.get_all(
@@ -117,6 +118,7 @@ class ProductoService:
             marca=marca,
             proveedor_id=proveedor,
             estado=estado,
+            destacado=destacado,
         )
 
     def list_paginated(
@@ -128,6 +130,7 @@ class ProductoService:
         marca: Optional[str] = None,
         proveedor: Optional[int] = None,
         estado: Optional[str] = None,
+        destacado: Optional[bool] = None,
     ) -> tuple[Sequence[Producto], int]:
         """
         Devuelve una página de productos (filtros combinables) y el total de
@@ -142,6 +145,7 @@ class ProductoService:
             marca=marca,
             proveedor_id=proveedor,
             estado=estado,
+            destacado=destacado,
         )
 
     def marcas(self, categoria: Optional[int] = None) -> Sequence[str]:

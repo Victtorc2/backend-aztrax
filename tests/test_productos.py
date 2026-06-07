@@ -123,6 +123,14 @@ class TestProductoFiltrosPaginacion:
     def test_pagina_invalida_rechaza(self, client, auth, seed):
         assert client.get("/productos", params={"page": 0}, headers=auth).status_code == 422
 
+    def test_filtro_destacado(self, client, auth, seed):
+        """El filtro destacado=true solo devuelve productos destacados."""
+        p = seed["tercero"]
+        client.put(f"/productos/{p['id']}/destacado", params={"destacado": True}, headers=auth)
+        body = client.get("/productos", params={"destacado": True}, headers=auth).json()
+        assert body["total"] >= 1
+        assert all(item["destacado"] for item in body["items"])
+
     def test_listar_marcas(self, client, auth, seed):
         r = client.get("/productos/marcas", headers=auth)
         assert r.status_code == 200

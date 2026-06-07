@@ -85,6 +85,9 @@ def listar_productos(
     estado: Annotated[
         Optional[EstadoProducto], Query(description="Filtrar por estado")
     ] = None,
+    destacado: Annotated[
+        Optional[bool], Query(description="Filtrar por destacados (true/false)")
+    ] = None,
     page: Annotated[int, Query(ge=1, description="Número de página (1-indexada)")] = 1,
     page_size: Annotated[
         int, Query(ge=1, le=100, description="Productos por página")
@@ -101,6 +104,7 @@ def listar_productos(
     - `?search=coca` (por nombre, marca o modelo)
     - `?proveedor=2`
     - `?estado=agotado`
+    - `?destacado=true`
     - `?page=2&page_size=10`
 
     Devuelve un objeto con `items` y los metadatos `total`, `page`,
@@ -114,6 +118,7 @@ def listar_productos(
         marca=marca,
         proveedor=proveedor,
         estado=estado.value if estado else None,
+        destacado=destacado,
     )
     return ProductosPaginados.build(list(productos), total, page, page_size)
 
