@@ -172,6 +172,125 @@ class TestProductoDestacado:
         assert r.json()["destacado"] is True
 
 
+class TestProductoRepresentacion:
+    """Campo opcional 'representacion' (unidad/sobre/caja/...)."""
+
+    def test_default_es_unidad(self, client, auth, seed):
+        """Si no se envía, la representación por defecto es 'unidad'."""
+        p = client.post("/productos", json={
+            "nombre": "Repr Default", "marca": "X",
+            "categoria_id": seed["categoria"]["id"],
+            "proveedor_id": seed["proveedor"]["id"],
+            "precio_compra": 1, "precio_venta": 2,
+            "stock": 1, "stock_minimo": 0,
+        }, headers=auth).json()
+        assert p["representacion"] == "unidad"
+
+    def test_crear_con_representacion(self, client, auth, seed):
+        p = client.post("/productos", json={
+            "nombre": "Sobre Anzuelos", "marca": "Owner",
+            "categoria_id": seed["categoria"]["id"],
+            "proveedor_id": seed["proveedor"]["id"],
+            "precio_compra": 1, "precio_venta": 3,
+            "stock": 10, "stock_minimo": 2,
+            "representacion": "sobre",
+        }, headers=auth).json()
+        assert p["representacion"] == "sobre"
+
+    def test_editar_representacion(self, client, auth, seed):
+        p = seed["tercero"]
+        r = client.put(f"/productos/{p['id']}", json={"representacion": "caja"}, headers=auth)
+        assert r.status_code == 200
+        assert r.json()["representacion"] == "caja"
+
+    def test_representacion_invalida_rechaza(self, client, auth, seed):
+        """Un valor fuera de la lista cerrada se rechaza (422)."""
+        r = client.post("/productos", json={
+            "nombre": "Repr Mala", "marca": "X",
+            "categoria_id": seed["categoria"]["id"],
+            "proveedor_id": seed["proveedor"]["id"],
+            "precio_compra": 1, "precio_venta": 2,
+            "stock": 1, "stock_minimo": 0,
+            "representacion": "tonel",
+        }, headers=auth)
+        assert r.status_code == 422
+
+
+class TestProductoActivar:
+    """Activar / desactivar productos (soft delete reversible)."""
+
+    def _crear(self, client, auth, seed, nombre):
+        return client.post("/productos", json={
+            "nombre": nombre, "marca": "ToggleMarca",
+            "categoria_id": seed["categoria"]["id"],
+            "proveedor_id": seed["proveedor"]["id"],
+            "precio_compra": 1, "precio_venta": 2,
+            "stock": 1, "stock_minimo": 0,
+        }, headers=auth).json()
+
+    def test_desactivar_lo_oculta_del_listado(self, client, auth, seed):
+        p = self._crear(client, auth, seed, "Para Desactivar")
+        r = client.put(f"/productos/{p['id']}/activo", params={"activo": False}, headers=auth)
+        assert r.status_code == 200
+        assert r.json()["is_active"] is False
+        # Ya no aparece en el listado por defecto (solo activos).
+        body = client.get("/productos", params={"page_size": 100}, headers=auth).json()
+        assert all(item["id"] != p["id"] for item in body["items"])
+
+    def test_filtro_activo_false_muestra_desactivados(self, client, auth, seed):
+        p = self._crear(client, auth, seed, "Desactivado Visible")
+        client.put(f"/productos/{p['id']}/activo", params={"activo": False}, headers=auth)
+        body = client.get("/productos", params={"activo": False, "page_size": 100}, headers=auth).json()
+        assert any(item["id"] == p["id"] for item in body["items"])
+
+    def test_reactivar_producto(self, client, auth, seed):
+        p = self._crear(client, auth, seed, "Para Reactivar")
+        client.put(f"/productos/{p['id']}/activo", params={"activo": False}, headers=auth)
+        r = client.put(f"/productos/{p['id']}/activo", params={"activo": True}, headers=auth)
+        assert r.status_code == 200
+        assert r.json()["is_active"] is True
+        # Vuelve a aparecer en el listado por defecto.
+        body = client.get("/productos", params={"page_size": 100}, headers=auth).json()
+        assert any(item["id"] == p["id"] for item in body["items"])
+
+    def test_desactivado_no_sale_en_catalogo(self, client, auth, seed, catalog_headers):
+        p = self._crear(client, auth, seed, "Oculto Catalogo")
+        client.put(f"/productos/{p['id']}/activo", params={"activo": False}, headers=auth)
+        body = client.get("/catalogo/productos", params={"page_size": 100}, headers=catalog_headers).json()
+        assert all(item["id"] != p["id"] for item in body["items"])
+
+    def test_activar_inexistente_404(self, client, auth):
+        r = client.put("/productos/99999/activo", params={"activo": False}, headers=auth)
+        assert r.status_code == 404
+
+
+class TestProductoOrden:
+    """Ordenamiento del listado de productos."""
+
+    def test_orden_nombre_ascendente(self, client, auth, seed):
+        """Con orden=nombre, los productos salen alfabéticamente (A-Z)."""
+        # Creamos varios con la misma marca y nombres desordenados.
+        for nombre in ["Zeta Orden", "Alfa Orden", "Mu Orden"]:
+            client.post("/productos", json={
+                "nombre": nombre, "marca": "OrdenTestMarca",
+                "categoria_id": seed["categoria"]["id"],
+                "proveedor_id": seed["proveedor"]["id"],
+                "precio_compra": 1, "precio_venta": 2,
+                "stock": 1, "stock_minimo": 0,
+            }, headers=auth)
+        body = client.get(
+            "/productos",
+            params={"orden": "nombre", "page_size": 100, "marca": "OrdenTestMarca"},
+            headers=auth,
+        ).json()
+        nombres = [item["nombre"] for item in body["items"]]
+        assert nombres == ["Alfa Orden", "Mu Orden", "Zeta Orden"]
+
+    def test_orden_invalido_rechaza(self, client, auth, seed):
+        r = client.get("/productos", params={"orden": "precio"}, headers=auth)
+        assert r.status_code == 422
+
+
 class TestCategoriaProveedor:
     """CRUD básico de categorías y proveedores."""
 

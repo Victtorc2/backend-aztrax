@@ -13,7 +13,7 @@ from decimal import Decimal
 from enum import Enum
 from typing import TYPE_CHECKING, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 if TYPE_CHECKING:
     from app.models.venta import DetalleVenta, Venta
@@ -44,10 +44,52 @@ class TipoPago(str, Enum):
 # Entrada: registrar venta
 # ---------------------------------------------------------------------------
 class VentaItemCreate(BaseModel):
-    """Una línea solicitada en la venta."""
+    """
+    Una línea solicitada en la venta. Puede ser de dos tipos:
 
-    producto_id: int = Field(..., gt=0)
+    1. **Producto registrado**: se envía `producto_id`. El precio lo pone el
+       servidor (precio_venta del producto) y se valida/descuenta stock.
+    2. **Línea libre**: producto NO registrado, escrito a mano. Se envía
+       `descripcion` y `precio` (tú fijas el precio). No toca stock.
+
+    Debe enviarse EXACTAMENTE uno de los dos: `producto_id`, o bien
+    `descripcion` + `precio`.
+    """
+
+    producto_id: Optional[int] = Field(default=None, gt=0)
     cantidad: int = Field(..., gt=0, examples=[2])
+    # Solo para líneas libres:
+    descripcion: Optional[str] = Field(
+        default=None, max_length=150, examples=["Anzuelos sueltos"]
+    )
+    precio: Optional[Decimal] = Field(
+        default=None, gt=0, max_digits=12, decimal_places=2, examples=[5.00]
+    )
+    # Costo unitario OPCIONAL de la línea libre: lo que te costó el artículo.
+    # Si lo indicas, la rentabilidad calcula la ganancia real; si lo omites,
+    # se asume costo 0 (toda la venta cuenta como ganancia).
+    costo: Optional[Decimal] = Field(
+        default=None, ge=0, max_digits=12, decimal_places=2, examples=[3.00]
+    )
+
+    @model_validator(mode="after")
+    def _validar_tipo_linea(self) -> "VentaItemCreate":
+        es_libre = self.producto_id is None
+        if es_libre:
+            # Línea libre: requiere descripción y precio. El costo es opcional.
+            descripcion = (self.descripcion or "").strip()
+            if not descripcion or self.precio is None:
+                raise ValueError(
+                    "Una línea libre requiere 'descripcion' y 'precio'"
+                )
+            self.descripcion = descripcion
+        else:
+            # Producto registrado: el precio/costo los pone el servidor;
+            # ignoramos cualquier dato libre que venga para evitar ambigüedad.
+            self.descripcion = None
+            self.precio = None
+            self.costo = None
+        return self
 
 
 class VentaCreate(BaseModel):
@@ -83,25 +125,44 @@ class DetalleHistorialResponse(BaseModel):
     """Una línea de detalle dentro del historial / detalle de venta."""
 
     id: int
-    producto_id: int
-    producto: str          # nombre del producto
+    producto_id: Optional[int]   # None en líneas libres (sin producto registrado)
+    producto: str                # nombre del producto o descripción libre
     marca: str
     codigo: str
+    es_libre: bool               # True si es una línea escrita a mano
     cantidad: int
-    precio: Decimal        # precio unitario
+    precio: Decimal              # precio unitario
     subtotal: Decimal
 
     model_config = ConfigDict(from_attributes=True)
 
     @classmethod
     def from_detalle(cls, d: "DetalleVenta") -> "DetalleHistorialResponse":
-        """Construye la línea a partir del ORM (usa el producto ya cargado)."""
+        """
+        Construye la línea a partir del ORM.
+
+        Si la línea es libre (sin producto), usa `descripcion_libre` como nombre
+        y deja marca/código vacíos.
+        """
+        if d.producto is not None:
+            return cls(
+                id=d.id,
+                producto_id=d.producto_id,
+                producto=d.producto.nombre,
+                marca=d.producto.marca,
+                codigo=d.producto.codigo,
+                es_libre=False,
+                cantidad=d.cantidad,
+                precio=d.precio,
+                subtotal=d.subtotal,
+            )
         return cls(
             id=d.id,
-            producto_id=d.producto_id,
-            producto=d.producto.nombre,
-            marca=d.producto.marca,
-            codigo=d.producto.codigo,
+            producto_id=None,
+            producto=d.descripcion_libre or "Venta libre",
+            marca="",
+            codigo="",
+            es_libre=True,
             cantidad=d.cantidad,
             precio=d.precio,
             subtotal=d.subtotal,

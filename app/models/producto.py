@@ -67,6 +67,12 @@ class Producto(Base):
         Boolean, nullable=False, default=False, server_default="0"
     )
 
+    # Representación / presentación de venta (unidad, sobre, caja, ...).
+    # Lista cerrada validada en el schema. Por defecto "unidad".
+    representacion: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="unidad", server_default="unidad"
+    )
+
     # Descripción larga del producto (texto libre para el catálogo).
     descripcion: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     # Ficha técnica: especificaciones, una por línea "Etiqueta: valor".

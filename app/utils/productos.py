@@ -26,6 +26,37 @@ class EstadoProducto(str, Enum):
     DISPONIBLE = "disponible"
 
 
+class Representacion(str, Enum):
+    """
+    Forma en que se presenta/vende un producto (lista cerrada).
+
+    Es OPCIONAL: un producto sin representación definida se entiende como
+    vendido por "unidad". Se usa una lista fija (en vez de texto libre) para
+    mantener los datos consistentes y poder filtrar/agrupar sin ensuciarlos.
+    """
+
+    UNIDAD = "unidad"
+    SOBRE = "sobre"
+    CAJA = "caja"
+    PAQUETE = "paquete"
+    BLISTER = "blister"
+    DOCENA = "docena"
+    PAR = "par"
+    KIT = "kit"
+
+
+class OrdenProducto(str, Enum):
+    """
+    Criterios de ordenamiento para el listado de productos.
+
+    - `reciente`: por fecha de creación descendente (comportamiento por defecto).
+    - `nombre`: alfabético ascendente (A-Z) por nombre del producto.
+    """
+
+    RECIENTE = "reciente"
+    NOMBRE = "nombre"
+
+
 def generate_product_code(sequence: int) -> str:
     """
     Genera un código de producto a partir de un número secuencial.

@@ -89,7 +89,8 @@ def listar_productos_catalogo(
         CatalogoProducto(
             id=p.id, codigo=p.codigo, nombre=p.nombre, marca=p.marca,
             modelo=p.modelo, categoria=p.categoria.nombre, precio_venta=p.precio_venta,
-            stock=p.stock, estado=p.estado, imagen_url=p.imagen_url, destacado=p.destacado,
+            stock=p.stock, estado=p.estado, representacion=p.representacion,
+            imagen_url=p.imagen_url, destacado=p.destacado,
             descripcion=p.descripcion, ficha_tecnica=p.ficha_tecnica,
         )
         for p in productos

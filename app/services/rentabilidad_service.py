@@ -101,9 +101,57 @@ class RentabilidadService:
                     margen_pct=_margen(ganancia, ingresos),
                 )
             )
+
+        # Fila agregada con las ventas libres (líneas sin producto registrado).
+        # El JOIN de arriba las excluye; aquí las sumamos aparte para que su
+        # ganancia real (ingreso - costo informado) entre en el reporte.
+        libre = self._ventas_libres(desde, hasta)
+        if libre is not None:
+            resultado.append(libre)
+
         # Mayor ganancia primero.
         resultado.sort(key=lambda r: r.ganancia, reverse=True)
         return resultado
+
+    def _ventas_libres(
+        self, desde: date | None, hasta: date | None
+    ) -> RentabilidadProducto | None:
+        """
+        Agrega todas las líneas libres (producto_id NULL) en una sola fila
+        "Ventas libres". Devuelve None si no hubo ninguna en el rango.
+        """
+        stmt = (
+            select(
+                func.sum(DetalleVenta.cantidad).label("unidades"),
+                func.sum(DetalleVenta.subtotal).label("ingresos"),
+                func.sum(DetalleVenta.costo_unitario * DetalleVenta.cantidad).label(
+                    "costo"
+                ),
+            )
+            .join(Venta, Venta.id == DetalleVenta.venta_id)
+            .where(DetalleVenta.producto_id.is_(None))
+        )
+        stmt = self._aplicar_rango(stmt, desde, hasta)
+        row = self.db.execute(stmt).one()
+
+        unidades = int(row.unidades or 0)
+        if unidades == 0:
+            return None
+
+        ingresos = _money(row.ingresos)
+        costo = _money(row.costo)
+        ganancia = (ingresos - costo).quantize(Decimal("0.01"))
+        return RentabilidadProducto(
+            producto_id=None,
+            codigo="—",
+            nombre="Ventas libres",
+            marca="",
+            unidades_vendidas=unidades,
+            ingresos=ingresos,
+            costo=costo,
+            ganancia=ganancia,
+            margen_pct=_margen(ganancia, ingresos),
+        )
 
     # ------------------------------------------------------------------
     # Por periodo (día o mes)

@@ -114,8 +114,14 @@ class DetalleVenta(Base):
     venta_id: Mapped[int] = mapped_column(
         ForeignKey("ventas.id"), index=True, nullable=False
     )
-    producto_id: Mapped[int] = mapped_column(
-        ForeignKey("productos.id"), index=True, nullable=False
+    # producto_id es OPCIONAL: en una "línea libre" (producto no registrado en
+    # el inventario, escrito a mano) queda en None y se usa descripcion_libre.
+    producto_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("productos.id"), index=True, nullable=True
+    )
+    # Texto escrito a mano cuando la línea es libre (sin producto registrado).
+    descripcion_libre: Mapped[Optional[str]] = mapped_column(
+        String(150), nullable=True
     )
 
     cantidad: Mapped[int] = mapped_column(Integer, nullable=False)

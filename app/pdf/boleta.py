@@ -64,6 +64,18 @@ def _wrap(text: str, font: str, size: int, max_width: float) -> list[str]:
     return lineas or [""]
 
 
+def _nombre_item(d) -> str:
+    """
+    Nombre a imprimir de una línea: el del producto (con su marca si tiene),
+    o la descripción escrita a mano si es una línea libre (sin producto).
+    """
+    if d.producto is not None:
+        if d.producto.marca:
+            return f"{d.producto.nombre} - {d.producto.marca}"
+        return d.producto.nombre
+    return d.descripcion_libre or "Venta libre"
+
+
 def _estimate_height(venta: Venta) -> float:
     """
     Estima el alto necesario del ticket según su contenido.
@@ -74,7 +86,7 @@ def _estimate_height(venta: Venta) -> float:
     """
     n_items_lineas = 0
     for d in venta.detalles:
-        nombre = f"{d.producto.nombre} {d.producto.marca or ''}".strip()
+        nombre = _nombre_item(d)
         n_items_lineas += len(_wrap(nombre, "Helvetica", 7, CONTENT_WIDTH)) + 1
 
     # Bloques fijos: encabezado del negocio (~4), recuadro del comprobante (~4),
@@ -181,9 +193,7 @@ def generate_boleta_pdf(venta: Venta) -> bytes:
 
     # --- Items ---------------------------------------------------------
     for d in venta.detalles:
-        nombre = d.producto.nombre
-        if d.producto.marca:
-            nombre = f"{nombre} - {d.producto.marca}"
+        nombre = _nombre_item(d)
         # Descripción del producto (puede ocupar varias líneas).
         for linea in _wrap(nombre, "Helvetica", 7, CONTENT_WIDTH):
             text_left(linea, font="Helvetica", size=7, gap=LINE_HEIGHT * 0.95)

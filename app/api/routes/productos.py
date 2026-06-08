@@ -28,7 +28,7 @@ from app.schemas.producto import (
     ProductoUpdate,
 )
 from app.services.producto_service import ProductoService
-from app.utils.productos import EstadoProducto
+from app.utils.productos import EstadoProducto, OrdenProducto
 
 # La autenticación se aplica a TODO el módulo de forma centralizada.
 router = APIRouter(
@@ -88,6 +88,17 @@ def listar_productos(
     destacado: Annotated[
         Optional[bool], Query(description="Filtrar por destacados (true/false)")
     ] = None,
+    activo: Annotated[
+        Optional[bool],
+        Query(
+            description="Filtrar por estado de activación: true=activos (por "
+            "defecto), false=desactivados, omitir para todos"
+        ),
+    ] = True,
+    orden: Annotated[
+        OrdenProducto,
+        Query(description="Orden: 'reciente' (por defecto) o 'nombre' (A-Z)"),
+    ] = OrdenProducto.RECIENTE,
     page: Annotated[int, Query(ge=1, description="Número de página (1-indexada)")] = 1,
     page_size: Annotated[
         int, Query(ge=1, le=100, description="Productos por página")
@@ -105,6 +116,8 @@ def listar_productos(
     - `?proveedor=2`
     - `?estado=agotado`
     - `?destacado=true`
+    - `?activo=false` (productos desactivados, para reactivarlos)
+    - `?orden=nombre` (alfabético A-Z; por defecto los más recientes)
     - `?page=2&page_size=10`
 
     Devuelve un objeto con `items` y los metadatos `total`, `page`,
@@ -119,6 +132,8 @@ def listar_productos(
         proveedor=proveedor,
         estado=estado.value if estado else None,
         destacado=destacado,
+        activo=activo,
+        orden=orden.value if orden else None,
     )
     return ProductosPaginados.build(list(productos), total, page, page_size)
 
@@ -271,6 +286,34 @@ def marcar_destacado(
     producto = ProductoService(db).update(
         producto_id, ProductoUpdate(destacado=destacado)
     )
+    return ProductoResponse.from_producto(producto)
+
+
+@router.put(
+    "/{producto_id}/activo",
+    response_model=ProductoResponse,
+    summary="Activar o desactivar un producto",
+)
+def activar_producto(
+    producto_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    _: CurrentUser,
+    activo: Annotated[
+        bool, Query(description="True para activar, False para desactivar")
+    ] = True,
+) -> ProductoResponse:
+    """
+    Activa o desactiva un producto (soft delete reversible).
+
+    Un producto desactivado deja de aparecer en el catálogo público y en los
+    listados por defecto, pero se conserva con todo su historial y puede
+    reactivarse en cualquier momento (a diferencia del DELETE).
+
+    Para encontrar los desactivados y reactivarlos, lista con `?activo=false`.
+
+    Responde **404** si el producto no existe.
+    """
+    producto = ProductoService(db).toggle_activo(producto_id, activo)
     return ProductoResponse.from_producto(producto)
 
 

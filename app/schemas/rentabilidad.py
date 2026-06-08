@@ -12,6 +12,7 @@ de modo que el reporte es histórico-fiel aunque el costo del producto cambie.
 
 from datetime import date
 from decimal import Decimal
+from typing import Optional
 
 from pydantic import BaseModel
 
@@ -19,7 +20,8 @@ from pydantic import BaseModel
 class RentabilidadProducto(BaseModel):
     """Rentabilidad acumulada de un producto en el periodo consultado."""
 
-    producto_id: int
+    # None en la fila agregada de "Ventas libres" (líneas sin producto registrado).
+    producto_id: Optional[int]
     codigo: str
     nombre: str
     marca: str

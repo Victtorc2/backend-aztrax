@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.sql import Select
 
 from app.models.producto import Producto
-from app.utils.productos import generate_product_code
+from app.utils.productos import OrdenProducto, generate_product_code
 
 
 class ProductoRepository:
@@ -65,6 +65,20 @@ class ProductoRepository:
         )
         return self.db.scalar(stmt)
 
+    def get_by_id_any(self, producto_id: int) -> Optional[Producto]:
+        """
+        Devuelve un producto por id SIN filtrar por estado (activo o inactivo).
+
+        Necesario para REACTIVAR un producto desactivado: `get_by_id` solo trae
+        activos, por lo que no sirve para encontrar uno desactivado.
+        """
+        stmt = (
+            select(Producto)
+            .where(Producto.id == producto_id)
+            .options(*self._eager())
+        )
+        return self.db.scalar(stmt)
+
     def _aplicar_filtros(
         self,
         stmt: Select,
@@ -108,6 +122,30 @@ class ProductoRepository:
             stmt = stmt.where(Producto.destacado.is_(destacado))
         return stmt
 
+    def _aplicar_estado_activo(self, stmt: Select, activo: Optional[bool]) -> Select:
+        """
+        Filtra por estado de activación:
+            True  -> solo activos (por defecto).
+            False -> solo desactivados (para revisarlos/reactivarlos).
+            None  -> todos (activos e inactivos).
+        """
+        if activo is True:
+            return stmt.where(Producto.is_active.is_(True))
+        if activo is False:
+            return stmt.where(Producto.is_active.is_(False))
+        return stmt
+
+    def _aplicar_orden(self, stmt: Select, orden: Optional[str]) -> Select:
+        """
+        Aplica el criterio de ordenamiento.
+
+        - "nombre": alfabético ascendente (A-Z).
+        - cualquier otro / None: más recientes primero (fecha desc).
+        """
+        if orden == OrdenProducto.NOMBRE.value:
+            return stmt.order_by(Producto.nombre.asc(), Producto.id.asc())
+        return stmt.order_by(Producto.created_at.desc(), Producto.id.desc())
+
     def get_all(
         self,
         search: Optional[str] = None,
@@ -116,22 +154,22 @@ class ProductoRepository:
         proveedor_id: Optional[int] = None,
         estado: Optional[str] = None,
         destacado: Optional[bool] = None,
+        activo: Optional[bool] = True,
+        orden: Optional[str] = None,
     ) -> Sequence[Producto]:
         """
-        Lista TODOS los productos activos que cumplen los filtros (sin paginar).
+        Lista TODOS los productos que cumplen los filtros (sin paginar).
 
         Se usa, por ejemplo, para el reporte PDF, que necesita el inventario
-        completo. Orden: fecha de creación descendente (id como desempate).
+        completo. Por defecto solo activos; `orden` permite alfabético (A-Z).
         """
-        stmt = (
-            select(Producto)
-            .where(Producto.is_active.is_(True))
-            .options(*self._eager())
+        stmt = self._aplicar_estado_activo(
+            select(Producto).options(*self._eager()), activo
         )
         stmt = self._aplicar_filtros(
             stmt, search, categoria_id, marca, proveedor_id, estado, destacado
         )
-        stmt = stmt.order_by(Producto.created_at.desc(), Producto.id.desc())
+        stmt = self._aplicar_orden(stmt, orden)
         return self.db.scalars(stmt).all()
 
     def get_paginated(
@@ -144,35 +182,38 @@ class ProductoRepository:
         proveedor_id: Optional[int] = None,
         estado: Optional[str] = None,
         destacado: Optional[bool] = None,
+        activo: Optional[bool] = True,
+        orden: Optional[str] = None,
     ) -> tuple[Sequence[Producto], int]:
         """
-        Devuelve una PÁGINA de productos activos junto con el total de
-        coincidencias (para que el cliente calcule el número de páginas).
+        Devuelve una PÁGINA de productos junto con el total de coincidencias
+        (para que el cliente calcule el número de páginas).
+
+        Por defecto solo activos (`activo=True`); con `activo=False` trae solo
+        los desactivados y con `activo=None` trae todos. `orden` permite
+        alfabético ascendente (A-Z) además del orden por defecto (recientes).
 
         Returns:
             (items, total): la lista de la página y el total sin paginar.
         """
         # Total de coincidencias: se cuenta sobre los mismos filtros, sin
         # ordenar ni cargar relaciones (más barato).
+        count_stmt = self._aplicar_estado_activo(
+            select(func.count(Producto.id)), activo
+        )
         count_stmt = self._aplicar_filtros(
-            select(func.count(Producto.id)).where(Producto.is_active.is_(True)),
-            search, categoria_id, marca, proveedor_id, estado, destacado,
+            count_stmt, search, categoria_id, marca, proveedor_id, estado, destacado,
         )
         total = self.db.scalar(count_stmt) or 0
 
-        stmt = (
-            select(Producto)
-            .where(Producto.is_active.is_(True))
-            .options(*self._eager())
+        stmt = self._aplicar_estado_activo(
+            select(Producto).options(*self._eager()), activo
         )
         stmt = self._aplicar_filtros(
             stmt, search, categoria_id, marca, proveedor_id, estado, destacado
         )
-        stmt = (
-            stmt.order_by(Producto.created_at.desc(), Producto.id.desc())
-            .offset((page - 1) * page_size)
-            .limit(page_size)
-        )
+        stmt = self._aplicar_orden(stmt, orden)
+        stmt = stmt.offset((page - 1) * page_size).limit(page_size)
         items = self.db.scalars(stmt).all()
         return items, total
 
@@ -230,6 +271,7 @@ class ProductoRepository:
         stock_minimo: int,
         estado: str,
         modelo: Optional[str] = None,
+        representacion: str = "unidad",
         descripcion: Optional[str] = None,
         ficha_tecnica: Optional[str] = None,
     ) -> Producto:
@@ -246,6 +288,7 @@ class ProductoRepository:
             stock=stock,
             stock_minimo=stock_minimo,
             estado=estado,
+            representacion=representacion,
             descripcion=descripcion,
             ficha_tecnica=ficha_tecnica,
         )
@@ -263,6 +306,17 @@ class ProductoRepository:
             setattr(producto, campo, valor)
         self.db.commit()
         return self.get_by_id(producto.id)  # type: ignore[return-value]
+
+    def set_active(self, producto: Producto, activo: bool) -> Producto:
+        """
+        Activa o desactiva un producto y devuelve el objeto recargado.
+
+        A diferencia de `update`, recarga con `get_by_id_any` para que también
+        funcione al DESACTIVAR (un producto inactivo no lo trae `get_by_id`).
+        """
+        producto.is_active = activo
+        self.db.commit()
+        return self.get_by_id_any(producto.id)  # type: ignore[return-value]
 
     def delete(self, producto: Producto) -> None:
         """

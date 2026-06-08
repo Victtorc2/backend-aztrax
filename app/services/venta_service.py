@@ -76,6 +76,27 @@ class VentaService:
         productos_cant: list[tuple] = []
 
         for item in data.items:
+            # --- Línea libre (producto NO registrado, escrito a mano) --------
+            if item.producto_id is None:
+                # El precio lo fija el vendedor; el costo es opcional (si no se
+                # indica, se asume 0). Una línea libre no controla stock.
+                precio = Decimal(item.precio)
+                costo = Decimal(item.costo) if item.costo is not None else Decimal("0.00")
+                linea_subtotal = (precio * item.cantidad).quantize(Decimal("0.01"))
+                subtotal += linea_subtotal
+                detalles.append(
+                    {
+                        "producto_id": None,
+                        "descripcion_libre": item.descripcion,
+                        "cantidad": item.cantidad,
+                        "precio": precio,
+                        "costo_unitario": costo,
+                        "subtotal": linea_subtotal,
+                    }
+                )
+                continue
+
+            # --- Producto registrado: precio del servidor + control de stock -
             producto = self.producto_repository.get_by_id(item.producto_id)
             if producto is None:
                 raise ProductoNotFoundError(

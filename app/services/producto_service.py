@@ -98,6 +98,7 @@ class ProductoService:
             stock=data.stock,
             stock_minimo=data.stock_minimo,
             estado=estado,
+            representacion=data.representacion.value,
             descripcion=data.descripcion,
             ficha_tecnica=data.ficha_tecnica,
         )
@@ -110,6 +111,8 @@ class ProductoService:
         proveedor: Optional[int] = None,
         estado: Optional[str] = None,
         destacado: Optional[bool] = None,
+        activo: Optional[bool] = True,
+        orden: Optional[str] = None,
     ) -> Sequence[Producto]:
         """Lista TODOS los productos con filtros opcionales combinables."""
         return self.repository.get_all(
@@ -119,6 +122,8 @@ class ProductoService:
             proveedor_id=proveedor,
             estado=estado,
             destacado=destacado,
+            activo=activo,
+            orden=orden,
         )
 
     def list_paginated(
@@ -131,6 +136,8 @@ class ProductoService:
         proveedor: Optional[int] = None,
         estado: Optional[str] = None,
         destacado: Optional[bool] = None,
+        activo: Optional[bool] = True,
+        orden: Optional[str] = None,
     ) -> tuple[Sequence[Producto], int]:
         """
         Devuelve una página de productos (filtros combinables) y el total de
@@ -146,6 +153,8 @@ class ProductoService:
             proveedor_id=proveedor,
             estado=estado,
             destacado=destacado,
+            activo=activo,
+            orden=orden,
         )
 
     def marcas(self, categoria: Optional[int] = None) -> Sequence[str]:
@@ -228,10 +237,29 @@ class ProductoService:
             nuevo_minimo = cambios.get("stock_minimo", producto.stock_minimo)
             cambios["estado"] = calculate_stock_status(nuevo_stock, nuevo_minimo)
 
+        # Normalizar el enum de representación a su valor de texto para la BD.
+        if cambios.get("representacion") is not None:
+            cambios["representacion"] = cambios["representacion"].value
+
         if not cambios:
             return producto
 
         return self.repository.update(producto, cambios)
+
+    def toggle_activo(self, producto_id: int, activo: bool) -> Producto:
+        """
+        Activa o desactiva un producto (soft delete reversible).
+
+        A diferencia de `delete`/`update`, busca el producto SIN filtrar por
+        estado, para poder reactivar uno que estaba desactivado.
+
+        Raises:
+            ProductoNotFoundError: si el producto no existe (ni activo ni inactivo).
+        """
+        producto = self.repository.get_by_id_any(producto_id)
+        if producto is None:
+            raise ProductoNotFoundError()
+        return self.repository.set_active(producto, activo)
 
     def delete(self, producto_id: int) -> None:
         """

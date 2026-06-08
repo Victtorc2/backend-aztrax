@@ -88,7 +88,8 @@ class VentaRepository:
             total=total,
             detalles=[
                 DetalleVenta(
-                    producto_id=d["producto_id"],
+                    producto_id=d.get("producto_id"),
+                    descripcion_libre=d.get("descripcion_libre"),
                     cantidad=d["cantidad"],
                     precio=d["precio"],
                     costo_unitario=d.get("costo_unitario", Decimal("0.00")),

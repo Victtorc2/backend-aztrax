@@ -23,6 +23,7 @@ class CatalogoProducto(BaseModel):
     precio_venta: Decimal
     stock: int
     estado: str  # "disponible", "bajo_stock", "agotado"
+    representacion: str  # "unidad", "sobre", "caja", ...
     imagen_url: Optional[str]
     destacado: bool
     descripcion: Optional[str]

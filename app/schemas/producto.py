@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.utils.productos import EstadoProducto
+from app.utils.productos import EstadoProducto, Representacion
 
 if TYPE_CHECKING:
     from app.models.producto import Producto
@@ -52,6 +52,10 @@ class ProductoCreate(BaseModel):
     # Stock: no puede ser negativo (>= 0).
     stock: int = Field(..., ge=0, examples=[15])
     stock_minimo: int = Field(..., ge=0, examples=[5])
+    # Representación de venta (opcional): unidad por defecto.
+    representacion: Representacion = Field(
+        default=Representacion.UNIDAD, examples=["unidad"]
+    )
     descripcion: Optional[str] = Field(default=None, max_length=5000)
     ficha_tecnica: Optional[str] = Field(default=None, max_length=5000)
 
@@ -90,6 +94,7 @@ class ProductoUpdate(BaseModel):
     stock: Optional[int] = Field(default=None, ge=0)
     stock_minimo: Optional[int] = Field(default=None, ge=0)
     destacado: Optional[bool] = Field(default=None)
+    representacion: Optional[Representacion] = Field(default=None)
     descripcion: Optional[str] = Field(default=None, max_length=5000)
     ficha_tecnica: Optional[str] = Field(default=None, max_length=5000)
 
@@ -127,6 +132,8 @@ class ProductoResponse(BaseModel):
     stock: int
     stock_minimo: int
     estado: EstadoProducto
+    representacion: Representacion
+    is_active: bool
     imagen_url: Optional[str]
     destacado: bool
     descripcion: Optional[str]
@@ -156,6 +163,8 @@ class ProductoResponse(BaseModel):
             stock=producto.stock,
             stock_minimo=producto.stock_minimo,
             estado=EstadoProducto(producto.estado),
+            representacion=Representacion(producto.representacion),
+            is_active=producto.is_active,
             imagen_url=producto.imagen_url,
             destacado=producto.destacado,
             descripcion=producto.descripcion,
