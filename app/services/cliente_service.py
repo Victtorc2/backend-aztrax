@@ -6,8 +6,8 @@ actualización parcial, baja lógica (no se elimina un cliente con deuda) y
 adjunta la deuda total a cada cliente devuelto. No conoce FastAPI.
 """
 
+from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Sequence
 
 from sqlalchemy.orm import Session
 
@@ -18,7 +18,15 @@ from app.core.exceptions import (
 )
 from app.models.cliente import Cliente
 from app.repositories.cliente_repository import ClienteRepository
-from app.schemas.cliente import ClienteCreate, ClienteResponse, ClienteUpdate
+from app.schemas.cliente import (
+    ClienteCreate,
+    ClienteInactivo,
+    ClienteResponse,
+    ClienteUpdate,
+    CompraResumen,
+    PerfilCliente,
+    ProductoFavorito,
+)
 
 
 class ClienteService:
@@ -54,6 +62,7 @@ class ClienteService:
             email=data.email,
             direccion=data.direccion,
             nota=data.nota,
+            fecha_nacimiento=data.fecha_nacimiento,
         )
         return self._to_response(cliente, Decimal("0.00"))
 
@@ -112,3 +121,101 @@ class ClienteService:
         if self.repository.deuda_total(cliente_id) > 0:
             raise ClienteHasDeudaError()
         self.repository.deactivate(cliente)
+
+    # ------------------------------------------------------------------
+    # Perfil / historial de compra
+    # ------------------------------------------------------------------
+    def perfil(self, cliente_id: int) -> PerfilCliente:
+        """
+        Construye el perfil 360° del cliente: datos, métricas de compra
+        (excluyen anuladas), productos favoritos e historial reciente.
+        """
+        cliente = self._get_or_404(cliente_id)
+        deuda = self.repository.deuda_total(cliente_id)
+
+        total_compras, total_gastado, ultima = self.repository.metricas_compra(
+            cliente_id
+        )
+        ticket = (
+            (total_gastado / total_compras).quantize(Decimal("0.01"))
+            if total_compras
+            else Decimal("0.00")
+        )
+
+        favoritos = [
+            ProductoFavorito(
+                producto_id=pid, nombre=nombre, marca=marca, unidades=unidades
+            )
+            for pid, nombre, marca, unidades in self.repository.productos_favoritos(
+                cliente_id
+            )
+        ]
+
+        recientes = [
+            CompraResumen(
+                venta_id=v.id,
+                numero_boleta=v.numero_boleta,
+                fecha=v.fecha,
+                total=v.total,
+                metodo_pago=v.metodo_pago,
+                tipo_pago=v.tipo_pago,
+                anulada=v.anulada,
+            )
+            for v in self.repository.compras_recientes(cliente_id)
+        ]
+
+        return PerfilCliente(
+            cliente=self._to_response(cliente, deuda),
+            total_compras=total_compras,
+            total_gastado=total_gastado,
+            ticket_promedio=ticket,
+            ultima_compra=ultima,
+            productos_favoritos=favoritos,
+            compras_recientes=recientes,
+        )
+
+    # ------------------------------------------------------------------
+    # Clientes inactivos (no compran hace X días)
+    # ------------------------------------------------------------------
+    def inactivos(self, dias: int = 30) -> list[ClienteInactivo]:
+        """
+        Clientes activos que compraron alguna vez pero no lo hacen hace al
+        menos `dias` días. Pensado para recuperarlos con una promo. Ordenados
+        por mayor tiempo sin comprar primero.
+        """
+        dias = max(1, dias)
+        ultimas = self.repository.ultima_compra_por_cliente()
+        gastos = self.repository.total_gastado_por_cliente()
+
+        resultado: list[ClienteInactivo] = []
+        for cliente_id, ultima in ultimas.items():
+            dias_sin = self._dias_desde(ultima)
+            if dias_sin is None or dias_sin < dias:
+                continue
+            cliente = self.repository.get_by_id(cliente_id)
+            if cliente is None or not cliente.is_active:
+                continue
+            resultado.append(
+                ClienteInactivo(
+                    id=cliente.id,
+                    nombre=cliente.nombre,
+                    telefono=cliente.telefono,
+                    ultima_compra=ultima,
+                    dias_sin_comprar=dias_sin,
+                    total_gastado=gastos.get(cliente_id, Decimal("0.00")),
+                )
+            )
+
+        resultado.sort(key=lambda c: c.dias_sin_comprar or 0, reverse=True)
+        return resultado
+
+    @staticmethod
+    def _dias_desde(momento: datetime | None) -> int | None:
+        """Días transcurridos desde `momento` hasta ahora (tz-safe)."""
+        if momento is None:
+            return None
+        if momento.tzinfo is None:
+            ahora = datetime.utcnow()
+        else:
+            ahora = datetime.now(timezone.utc)
+        return (ahora - momento).days

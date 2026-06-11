@@ -14,6 +14,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy import (
+    Boolean,
     DateTime,
     ForeignKey,
     Integer,
@@ -71,6 +72,26 @@ class Venta(Base):
     # igual al total y baja con cada abono hasta llegar a 0 (deuda saldada).
     saldo_pendiente: Mapped[Decimal] = mapped_column(
         Numeric(12, 2), nullable=False, default=Decimal("0.00"), server_default="0.00"
+    )
+
+    # Sesión de caja a la que pertenece la venta (si había una caja abierta al
+    # registrarla). Permite cuadrar el arqueo sin depender de timestamps.
+    caja_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("cajas.id"), index=True, nullable=True
+    )
+
+    # --- Anulación (devolución total) -------------------------------------
+    # Una venta anulada se conserva en el historial pero deja de contar en los
+    # reportes (dashboard, rentabilidad, caja). Al anular se repone el stock y
+    # se revierten los puntos otorgados.
+    anulada: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0", index=True
+    )
+    anulada_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    motivo_anulacion: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True
     )
 
     # Fecha y hora de la venta (UTC), gestionada por la BD.

@@ -51,7 +51,11 @@ class RentabilidadService:
     # Helpers de rango de fechas
     # ------------------------------------------------------------------
     def _aplicar_rango(self, stmt, desde: date | None, hasta: date | None):
-        """Aplica el filtro de fechas (sobre Venta.fecha) a un statement con join a Venta."""
+        """
+        Aplica el filtro de fechas (sobre Venta.fecha) a un statement con join a
+        Venta y excluye las ventas anuladas (no cuentan en la rentabilidad).
+        """
+        stmt = stmt.where(Venta.anulada.is_(False))
         if desde is not None:
             stmt = stmt.where(Venta.fecha >= datetime.combine(desde, time.min))
         if hasta is not None:

@@ -11,7 +11,7 @@ Responsabilidades:
 No conoce FastAPI: lanza excepciones de dominio que la API traduce a HTTP.
 """
 
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Optional, Sequence
 
@@ -25,13 +25,16 @@ from app.core.exceptions import (
     StockInsuficienteError,
     VentaInvalidaError,
     VentaNotFoundError,
+    VentaYaAnuladaError,
 )
 from app.models.venta import Venta
 from app.pdf.boleta import boleta_filename, generate_boleta_pdf
+from app.repositories.caja_repository import CajaRepository
 from app.repositories.cliente_repository import ClienteRepository
 from app.repositories.producto_repository import ProductoRepository
 from app.repositories.venta_repository import VentaRepository
 from app.schemas.venta import DescuentoTipo, TipoPago, VentaCreate
+from app.services.puntos_service import PuntosService
 from app.utils.productos import calculate_stock_status
 
 
@@ -177,9 +180,61 @@ class VentaService:
             producto.estado = calculate_stock_status(
                 producto.stock, producto.stock_minimo
             )
+
+        # Vincular la venta a la caja abierta (si la hay) para el arqueo.
+        caja_abierta = CajaRepository(self.db).get_abierta()
+        if caja_abierta is not None:
+            venta.caja_id = caja_abierta.id
+
+        # Otorgar puntos de fidelización si la venta tiene cliente asociado.
+        if cliente_id is not None:
+            PuntosService(self.db).otorgar_por_venta(cliente_id, total, venta.id)
+
         self.db.commit()
 
         return venta
+
+    # ==================================================================
+    # Anulación (devolución total)
+    # ==================================================================
+    def anular_venta(self, venta_id: int, motivo: Optional[str] = None) -> Venta:
+        """
+        Anula una venta (devolución total): repone el stock de sus productos,
+        revierte los puntos otorgados y la marca como anulada. La venta se
+        conserva en el historial pero deja de contar en los reportes.
+
+        Raises:
+            VentaNotFoundError: si la venta no existe.
+            VentaYaAnuladaError: si ya estaba anulada.
+        """
+        venta = self.repository.get_by_id(venta_id)
+        if venta is None:
+            raise VentaNotFoundError()
+        if venta.anulada:
+            raise VentaYaAnuladaError()
+
+        # Reponer stock de las líneas con producto registrado.
+        for detalle in venta.detalles:
+            if detalle.producto_id is None or detalle.producto is None:
+                continue
+            producto = detalle.producto
+            producto.stock += detalle.cantidad
+            producto.estado = calculate_stock_status(
+                producto.stock, producto.stock_minimo
+            )
+
+        # Revertir los puntos de fidelización que otorgó.
+        if venta.cliente_id is not None:
+            PuntosService(self.db).revertir_por_venta(venta.cliente_id, venta.id)
+
+        venta.anulada = True
+        venta.anulada_at = datetime.utcnow()
+        venta.motivo_anulacion = motivo
+        # Una deuda de una venta anulada deja de exigirse.
+        venta.saldo_pendiente = Decimal("0.00")
+
+        self.db.commit()
+        return self.repository.get_by_id(venta_id)  # type: ignore[return-value]
 
     def _resolver_cliente_rapido(
         self, nombre: Optional[str], documento: Optional[str]

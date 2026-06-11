@@ -231,3 +231,61 @@ class CreditoSinClienteError(AppException):
 
     status_code = 400
     detail = "Una venta al crédito requiere un cliente"
+
+
+# ---------------------------------------------------------------------------
+# Fidelización (puntos)
+# ---------------------------------------------------------------------------
+class PuntosInsuficientesError(AppException):
+    """El cliente no tiene suficientes puntos para el canje solicitado."""
+
+    status_code = 400
+    detail = "El cliente no tiene suficientes puntos"
+
+
+class CanjeInvalidoError(AppException):
+    """La cantidad de puntos a canjear no es válida (<= 0)."""
+
+    status_code = 400
+    detail = "La cantidad de puntos a canjear no es válida"
+
+
+# ---------------------------------------------------------------------------
+# Caja diaria (apertura / cierre / arqueo)
+# ---------------------------------------------------------------------------
+class CajaYaAbiertaError(AppException):
+    """Ya existe una caja abierta; debe cerrarse antes de abrir otra."""
+
+    status_code = 409
+    detail = "Ya hay una caja abierta"
+
+
+class CajaNoAbiertaError(AppException):
+    """No hay ninguna caja abierta para la operación solicitada."""
+
+    status_code = 409
+    detail = "No hay una caja abierta"
+
+
+class CajaNotFoundError(AppException):
+    """No existe una sesión de caja con el identificador indicado."""
+
+    status_code = 404
+    detail = "Sesión de caja no encontrada"
+
+
+class MovimientoCajaInvalidoError(AppException):
+    """El movimiento de caja es inválido (monto <= 0 o tipo desconocido)."""
+
+    status_code = 400
+    detail = "El movimiento de caja no es válido"
+
+
+# ---------------------------------------------------------------------------
+# Anulación de ventas (devoluciones)
+# ---------------------------------------------------------------------------
+class VentaYaAnuladaError(AppException):
+    """La venta ya estaba anulada; no puede anularse de nuevo."""
+
+    status_code = 409
+    detail = "La venta ya está anulada"

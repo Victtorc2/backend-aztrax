@@ -110,6 +110,13 @@ class Settings(BaseSettings):
     BOLETA_SERIE: str = "B001"
 
     # ------------------------------------------------------------------
+    # FIDELIZACIÓN (PUNTOS)
+    # ------------------------------------------------------------------
+    # Soles de compra necesarios para ganar 1 punto. Con el valor por defecto
+    # (10), una compra de S/ 55 otorga 5 puntos. Debe ser > 0.
+    PUNTOS_SOLES_POR_PUNTO: int = 10
+
+    # ------------------------------------------------------------------
     # CONFIG PYDANTIC
     # ------------------------------------------------------------------
     model_config = SettingsConfigDict(

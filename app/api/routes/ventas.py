@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.dependencies.auth import CurrentUser, get_current_user
 from app.schemas.credito import AbonoCreate, AbonoResponse
-from app.schemas.venta import VentaCreate, VentaDetalleResponse
+from app.schemas.venta import AnularVentaRequest, VentaCreate, VentaDetalleResponse
 from app.services.credito_service import CreditoService
 from app.services.venta_service import VentaService
 
@@ -72,6 +72,29 @@ def registrar_abono(
     - **404** si la venta no existe.
     """
     return CreditoService(db).registrar_abono(venta_id, data)
+
+
+@router.post(
+    "/{venta_id}/anular",
+    response_model=VentaDetalleResponse,
+    summary="Anular una venta (devolución total)",
+)
+def anular_venta(
+    venta_id: int,
+    data: AnularVentaRequest,
+    db: Annotated[Session, Depends(get_db)],
+    _: CurrentUser,
+) -> VentaDetalleResponse:
+    """
+    Anula una venta: repone el stock de sus productos, revierte los puntos
+    otorgados y la marca como anulada (deja de contar en los reportes). La
+    venta se conserva en el historial.
+
+    - **404** si la venta no existe.
+    - **409** si ya estaba anulada.
+    """
+    venta = VentaService(db).anular_venta(venta_id, data.motivo)
+    return VentaDetalleResponse.from_venta(venta)
 
 
 @router.get(

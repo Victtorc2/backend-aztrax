@@ -118,6 +118,14 @@ class VentaCreate(BaseModel):
     cliente_documento: Optional[str] = Field(default=None, max_length=20)
 
 
+class AnularVentaRequest(BaseModel):
+    """Datos para anular (devolución total) una venta."""
+
+    motivo: Optional[str] = Field(
+        default=None, max_length=255, examples=["Producto devuelto por el cliente"]
+    )
+
+
 # ---------------------------------------------------------------------------
 # Salida: detalle de líneas
 # ---------------------------------------------------------------------------
@@ -186,6 +194,7 @@ class HistorialResponse(BaseModel):
     saldo_pendiente: Decimal
     cliente_id: Optional[int]
     cliente_nombre: Optional[str]
+    anulada: bool
     cantidad_productos: int  # nº de líneas distintas en la venta
 
     model_config = ConfigDict(from_attributes=True)
@@ -204,6 +213,7 @@ class HistorialResponse(BaseModel):
             saldo_pendiente=v.saldo_pendiente,
             cliente_id=v.cliente_id,
             cliente_nombre=v.cliente.nombre if v.cliente else None,
+            anulada=v.anulada,
             cantidad_productos=len(v.detalles),
         )
 
@@ -225,6 +235,8 @@ class VentaDetalleResponse(BaseModel):
     saldo_pendiente: Decimal
     cliente_id: Optional[int]
     cliente_nombre: Optional[str]
+    anulada: bool
+    motivo_anulacion: Optional[str]
     total: Decimal
     detalles: list[DetalleHistorialResponse]
 
@@ -244,6 +256,8 @@ class VentaDetalleResponse(BaseModel):
             saldo_pendiente=v.saldo_pendiente,
             cliente_id=v.cliente_id,
             cliente_nombre=v.cliente.nombre if v.cliente else None,
+            anulada=v.anulada,
+            motivo_anulacion=v.motivo_anulacion,
             total=v.total,
             detalles=[DetalleHistorialResponse.from_detalle(d) for d in v.detalles],
         )

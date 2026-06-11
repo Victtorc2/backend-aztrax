@@ -12,6 +12,8 @@ from app.models.proveedor import Proveedor
 from app.models.producto import Producto
 from app.models.venta import Venta, DetalleVenta, Abono
 from app.models.cliente import Cliente
+from app.models.puntos import MovimientoPuntos
+from app.models.caja import Caja, MovimientoCaja
 from app.models.banner import Banner
 from app.models.user import Usuario
 
@@ -24,5 +26,8 @@ __all__ = [
     "DetalleVenta",
     "Abono",
     "Cliente",
+    "MovimientoPuntos",
+    "Caja",
+    "MovimientoCaja",
     "Banner",
 ]

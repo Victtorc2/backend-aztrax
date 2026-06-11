@@ -9,6 +9,7 @@ from fastapi import APIRouter
 from app.api.routes import (
     auth,
     banners,
+    caja,
     catalogo,
     categorias,
     clientes,
@@ -41,6 +42,8 @@ api_router.include_router(historial.router)
 api_router.include_router(dashboard.router)
 # Clientes y crédito (fiado).
 api_router.include_router(clientes.router)
+# Caja diaria (apertura, arqueo y cierre).
+api_router.include_router(caja.router)
 # Rentabilidad (reportes de ganancia).
 api_router.include_router(rentabilidad.router)
 # Catálogo público (API key).

@@ -5,10 +5,10 @@ Lista de clientes del negocio. Un cliente puede tener ventas al crédito
 asociadas (fiado); la relación se define desde el lado de Venta.
 """
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, String, func
+from sqlalchemy import Boolean, Date, DateTime, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -34,6 +34,15 @@ class Cliente(Base):
     email: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
     direccion: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     nota: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+
+    # Fecha de nacimiento (opcional). Permite saludar y dar promos de cumpleaños.
+    fecha_nacimiento: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+
+    # Saldo de puntos de fidelización. Se acumula con cada compra y se reduce al
+    # canjearlos. El historial de movimientos vive en `movimientos_puntos`.
+    puntos: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
 
     # Baja lógica: nunca se borra un cliente con historial; se desactiva.
     is_active: Mapped[bool] = mapped_column(

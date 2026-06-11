@@ -57,21 +57,27 @@ class DashboardService:
         inicio = datetime.combine(hoy, time.min)
         fin = datetime.combine(hoy, time.max)
 
-        # Ventas de hoy.
+        # Ventas de hoy (excluye anuladas).
         ventas_hoy = db.scalar(
             select(func.count())
             .select_from(Venta)
-            .where(Venta.fecha.between(inicio, fin))
+            .where(Venta.fecha.between(inicio, fin), Venta.anulada.is_(False))
         ) or 0
         monto_hoy = db.scalar(
             select(func.coalesce(func.sum(Venta.total), 0)).where(
-                Venta.fecha.between(inicio, fin)
+                Venta.fecha.between(inicio, fin), Venta.anulada.is_(False)
             )
         )
 
-        # Totales históricos.
-        ventas_total = db.scalar(select(func.count()).select_from(Venta)) or 0
-        monto_total = db.scalar(select(func.coalesce(func.sum(Venta.total), 0)))
+        # Totales históricos (excluyen anuladas).
+        ventas_total = db.scalar(
+            select(func.count()).select_from(Venta).where(Venta.anulada.is_(False))
+        ) or 0
+        monto_total = db.scalar(
+            select(func.coalesce(func.sum(Venta.total), 0)).where(
+                Venta.anulada.is_(False)
+            )
+        )
 
         monto_total_dec = _money(monto_total)
         ticket_promedio = (
@@ -133,7 +139,9 @@ class DashboardService:
         inicio = datetime.combine(desde, time.min)
 
         filas = self.db.execute(
-            select(Venta.fecha, Venta.total).where(Venta.fecha >= inicio)
+            select(Venta.fecha, Venta.total).where(
+                Venta.fecha >= inicio, Venta.anulada.is_(False)
+            )
         ).all()
 
         # Acumular por día.
@@ -174,6 +182,8 @@ class DashboardService:
                 func.sum(DetalleVenta.subtotal).label("monto"),
             )
             .join(DetalleVenta, DetalleVenta.producto_id == Producto.id)
+            .join(Venta, Venta.id == DetalleVenta.venta_id)
+            .where(Venta.anulada.is_(False))
             .group_by(Producto.id, Producto.codigo, Producto.nombre, Producto.marca)
             .order_by(func.sum(DetalleVenta.cantidad).desc())
             .limit(limite)
@@ -202,6 +212,7 @@ class DashboardService:
                 func.count().label("cantidad"),
                 func.coalesce(func.sum(Venta.total), 0).label("monto"),
             )
+            .where(Venta.anulada.is_(False))
             .group_by(Venta.metodo_pago)
             .order_by(func.sum(Venta.total).desc())
         )

@@ -20,10 +20,18 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.dependencies.auth import CurrentUser, get_current_user
-from app.schemas.cliente import ClienteCreate, ClienteResponse, ClienteUpdate
+from app.schemas.cliente import (
+    ClienteCreate,
+    ClienteInactivo,
+    ClienteResponse,
+    ClienteUpdate,
+    PerfilCliente,
+)
 from app.schemas.credito import EstadoCuentaResponse
+from app.schemas.puntos import CanjeCreate, PuntosResponse
 from app.services.cliente_service import ClienteService
 from app.services.credito_service import CreditoService
+from app.services.puntos_service import PuntosService
 
 router = APIRouter(
     prefix="/clientes",
@@ -84,6 +92,27 @@ def listar_deudores(
 
 
 @router.get(
+    "/inactivos",
+    response_model=list[ClienteInactivo],
+    summary="Clientes que no compran hace tiempo (para recuperar)",
+)
+def listar_inactivos(
+    db: Annotated[Session, Depends(get_db)],
+    _: CurrentUser,
+    dias: Annotated[
+        int,
+        Query(ge=1, description="Días mínimos sin comprar para considerarlo inactivo"),
+    ] = 30,
+) -> list[ClienteInactivo]:
+    """
+    Devuelve clientes activos que compraron alguna vez pero no lo hacen hace al
+    menos `dias` días. Ordenados por mayor tiempo sin comprar. Útil para
+    enviarles una promo por WhatsApp y recuperarlos.
+    """
+    return ClienteService(db).inactivos(dias=dias)
+
+
+@router.get(
     "/{cliente_id}",
     response_model=ClienteResponse,
     summary="Obtener un cliente por su id",
@@ -112,6 +141,58 @@ def estado_cuenta(
     y saldos, más el total adeudado. **404** si el cliente no existe.
     """
     return CreditoService(db).estado_cuenta(cliente_id)
+
+
+@router.get(
+    "/{cliente_id}/perfil",
+    response_model=PerfilCliente,
+    summary="Perfil 360°: métricas de compra, favoritos e historial reciente",
+)
+def perfil_cliente(
+    cliente_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    _: CurrentUser,
+) -> PerfilCliente:
+    """
+    Devuelve el perfil del cliente: total gastado, número de compras, ticket
+    promedio, última visita, sus productos favoritos y sus compras recientes.
+    Las métricas excluyen ventas anuladas. **404** si el cliente no existe.
+    """
+    return ClienteService(db).perfil(cliente_id)
+
+
+@router.get(
+    "/{cliente_id}/puntos",
+    response_model=PuntosResponse,
+    summary="Saldo de puntos del cliente y su historial",
+)
+def obtener_puntos(
+    cliente_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    _: CurrentUser,
+) -> PuntosResponse:
+    """Devuelve el saldo de puntos y los movimientos. **404** si no existe."""
+    return PuntosService(db).estado(cliente_id)
+
+
+@router.post(
+    "/{cliente_id}/puntos/canjear",
+    response_model=PuntosResponse,
+    summary="Canjear puntos del cliente",
+)
+def canjear_puntos(
+    cliente_id: int,
+    data: CanjeCreate,
+    db: Annotated[Session, Depends(get_db)],
+    _: CurrentUser,
+) -> PuntosResponse:
+    """
+    Descuenta puntos del saldo del cliente (canje por un beneficio).
+
+    - **400** si la cantidad es inválida o no tiene suficientes puntos.
+    - **404** si el cliente no existe.
+    """
+    return PuntosService(db).canjear(cliente_id, data)
 
 
 @router.put(

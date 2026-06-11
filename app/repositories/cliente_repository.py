@@ -6,6 +6,7 @@ la deuda total de cada cliente (suma de saldos pendientes de sus ventas al
 crédito) mediante una agregación SQL, sin cargar las ventas en memoria.
 """
 
+from datetime import datetime
 from decimal import Decimal
 from typing import Any, Optional, Sequence
 
@@ -13,7 +14,8 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.models.cliente import Cliente
-from app.models.venta import Venta
+from app.models.producto import Producto
+from app.models.venta import DetalleVenta, Venta
 
 _CERO = Decimal("0.00")
 
@@ -90,6 +92,91 @@ class ClienteRepository:
         return {
             cid: Decimal(total or 0).quantize(Decimal("0.01"))
             for cid, total in filas
+        }
+
+    # ------------------------------------------------------------------
+    # Perfil e historial de compra (excluye ventas anuladas)
+    # ------------------------------------------------------------------
+    def metricas_compra(self, cliente_id: int) -> tuple[int, Decimal, Optional[datetime]]:
+        """
+        Devuelve (total_compras, total_gastado, ultima_compra) del cliente,
+        considerando solo ventas NO anuladas.
+        """
+        row = self.db.execute(
+            select(
+                func.count(Venta.id),
+                func.coalesce(func.sum(Venta.total), 0),
+                func.max(Venta.fecha),
+            ).where(
+                Venta.cliente_id == cliente_id,
+                Venta.anulada.is_(False),
+            )
+        ).one()
+        total_compras = int(row[0] or 0)
+        total_gastado = Decimal(row[1] or 0).quantize(Decimal("0.01"))
+        ultima_compra = row[2]
+        return total_compras, total_gastado, ultima_compra
+
+    def productos_favoritos(
+        self, cliente_id: int, limite: int = 5
+    ) -> list[tuple[int, str, str, int]]:
+        """
+        Top de productos (registrados) más comprados por el cliente, como
+        lista de (producto_id, nombre, marca, unidades). Excluye anuladas y
+        líneas libres.
+        """
+        stmt = (
+            select(
+                Producto.id,
+                Producto.nombre,
+                Producto.marca,
+                func.sum(DetalleVenta.cantidad).label("unidades"),
+            )
+            .join(DetalleVenta, DetalleVenta.producto_id == Producto.id)
+            .join(Venta, Venta.id == DetalleVenta.venta_id)
+            .where(Venta.cliente_id == cliente_id, Venta.anulada.is_(False))
+            .group_by(Producto.id, Producto.nombre, Producto.marca)
+            .order_by(func.sum(DetalleVenta.cantidad).desc())
+            .limit(limite)
+        )
+        filas = self.db.execute(stmt).all()
+        return [(r.id, r.nombre, r.marca, int(r.unidades or 0)) for r in filas]
+
+    def compras_recientes(
+        self, cliente_id: int, limite: int = 10
+    ) -> Sequence[Venta]:
+        """Últimas ventas del cliente (incluye anuladas, marcadas como tal)."""
+        stmt = (
+            select(Venta)
+            .where(Venta.cliente_id == cliente_id)
+            .order_by(Venta.fecha.desc(), Venta.id.desc())
+            .limit(limite)
+        )
+        return self.db.scalars(stmt).all()
+
+    def ultima_compra_por_cliente(self) -> dict[int, datetime]:
+        """
+        {cliente_id: fecha_ultima_compra} sobre ventas NO anuladas, para detectar
+        clientes inactivos en una sola consulta.
+        """
+        filas = self.db.execute(
+            select(Venta.cliente_id, func.max(Venta.fecha))
+            .where(Venta.cliente_id.is_not(None), Venta.anulada.is_(False))
+            .group_by(Venta.cliente_id)
+        ).all()
+        return {cid: fecha for cid, fecha in filas if cid is not None}
+
+    def total_gastado_por_cliente(self) -> dict[int, Decimal]:
+        """{cliente_id: total_gastado} sobre ventas NO anuladas."""
+        filas = self.db.execute(
+            select(Venta.cliente_id, func.coalesce(func.sum(Venta.total), 0))
+            .where(Venta.cliente_id.is_not(None), Venta.anulada.is_(False))
+            .group_by(Venta.cliente_id)
+        ).all()
+        return {
+            cid: Decimal(total or 0).quantize(Decimal("0.01"))
+            for cid, total in filas
+            if cid is not None
         }
 
     # ------------------------------------------------------------------
