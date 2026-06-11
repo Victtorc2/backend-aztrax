@@ -289,3 +289,10 @@ class VentaYaAnuladaError(AppException):
 
     status_code = 409
     detail = "La venta ya está anulada"
+
+
+class VentaNoEditableError(AppException):
+    """La venta no se puede editar (fuera de plazo o anulada)."""
+
+    status_code = 409
+    detail = "La venta ya no se puede modificar"

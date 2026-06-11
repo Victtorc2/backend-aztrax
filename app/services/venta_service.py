@@ -11,12 +11,13 @@ Responsabilidades:
 No conoce FastAPI: lanza excepciones de dominio que la API traduce a HTTP.
 """
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Optional, Sequence
 
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.exceptions import (
     BoletaNotAvailableError,
     ClienteNotFoundError,
@@ -24,10 +25,11 @@ from app.core.exceptions import (
     ProductoNotFoundError,
     StockInsuficienteError,
     VentaInvalidaError,
+    VentaNoEditableError,
     VentaNotFoundError,
     VentaYaAnuladaError,
 )
-from app.models.venta import Venta
+from app.models.venta import DetalleVenta, Venta
 from app.pdf.boleta import boleta_filename, generate_boleta_pdf
 from app.repositories.caja_repository import CajaRepository
 from app.repositories.cliente_repository import ClienteRepository
@@ -73,60 +75,8 @@ class VentaService:
         if not data.items:
             raise VentaInvalidaError("La venta debe incluir al menos un producto")
 
-        subtotal = Decimal("0.00")
-        detalles: list[dict] = []
-        # Guardamos referencias a los productos para descontar stock luego.
-        productos_cant: list[tuple] = []
+        subtotal, detalles, productos_cant = self._construir_lineas(data.items)
 
-        for item in data.items:
-            # --- Línea libre (producto NO registrado, escrito a mano) --------
-            if item.producto_id is None:
-                # El precio lo fija el vendedor; el costo es opcional (si no se
-                # indica, se asume 0). Una línea libre no controla stock.
-                precio = Decimal(item.precio)
-                costo = Decimal(item.costo) if item.costo is not None else Decimal("0.00")
-                linea_subtotal = (precio * item.cantidad).quantize(Decimal("0.01"))
-                subtotal += linea_subtotal
-                detalles.append(
-                    {
-                        "producto_id": None,
-                        "descripcion_libre": item.descripcion,
-                        "cantidad": item.cantidad,
-                        "precio": precio,
-                        "costo_unitario": costo,
-                        "subtotal": linea_subtotal,
-                    }
-                )
-                continue
-
-            # --- Producto registrado: precio del servidor + control de stock -
-            producto = self.producto_repository.get_by_id(item.producto_id)
-            if producto is None:
-                raise ProductoNotFoundError(
-                    f"Producto {item.producto_id} no encontrado"
-                )
-            if item.cantidad > producto.stock:
-                raise StockInsuficienteError(
-                    f"Stock insuficiente para '{producto.nombre}' "
-                    f"(disponible: {producto.stock}, solicitado: {item.cantidad})"
-                )
-
-            precio = Decimal(producto.precio_venta)
-            costo = Decimal(producto.precio_compra)
-            linea_subtotal = (precio * item.cantidad).quantize(Decimal("0.01"))
-            subtotal += linea_subtotal
-            detalles.append(
-                {
-                    "producto_id": producto.id,
-                    "cantidad": item.cantidad,
-                    "precio": precio,
-                    "costo_unitario": costo,
-                    "subtotal": linea_subtotal,
-                }
-            )
-            productos_cant.append((producto, item.cantidad))
-
-        subtotal = subtotal.quantize(Decimal("0.01"))
         descuento_aplicado = self._calcular_descuento(
             subtotal, data.descuento, data.descuento_tipo
         )
@@ -235,6 +185,196 @@ class VentaService:
 
         self.db.commit()
         return self.repository.get_by_id(venta_id)  # type: ignore[return-value]
+
+    # ==================================================================
+    # Editar venta (modificar boleta dentro del plazo)
+    # ==================================================================
+    def puede_editarse(self, venta: Venta) -> bool:
+        """True si la venta está dentro del plazo de edición y no está anulada."""
+        if venta.anulada:
+            return False
+        fecha = venta.fecha
+        if fecha.tzinfo is not None:
+            fecha = fecha.replace(tzinfo=None)
+        limite = datetime.utcnow() - timedelta(days=settings.VENTA_EDIT_DIAS)
+        return fecha >= limite
+
+    def editar_venta(self, venta_id: int, data: VentaCreate) -> Venta:
+        """
+        Modifica una venta existente dentro del plazo permitido
+        (settings.VENTA_EDIT_DIAS días). Recalcula stock, totales y puntos:
+
+        1. Revierte la venta actual: repone el stock de sus productos y los
+           puntos que otorgó.
+        2. Valida y construye las nuevas líneas (con el stock ya repuesto).
+        3. Reemplaza el detalle y recalcula subtotal/descuento/total.
+        4. Vuelve a descontar el stock y a otorgar los puntos.
+
+        Conserva el número de boleta, la fecha original y la caja asociada. En
+        ventas al crédito recalcula el saldo restando lo ya abonado.
+
+        Raises:
+            VentaNotFoundError: la venta no existe.
+            VentaNoEditableError: está anulada o fuera de plazo.
+            VentaInvalidaError / ProductoNotFoundError / StockInsuficienteError.
+        """
+        venta = self.repository.get_by_id(venta_id)
+        if venta is None:
+            raise VentaNotFoundError()
+        if venta.anulada:
+            raise VentaNoEditableError("No se puede editar una venta anulada")
+        if not self.puede_editarse(venta):
+            raise VentaNoEditableError(
+                f"Solo se puede modificar una venta dentro de "
+                f"{settings.VENTA_EDIT_DIAS} días"
+            )
+        if not data.items:
+            raise VentaInvalidaError("La venta debe incluir al menos un producto")
+
+        # 1. Revertir efectos de la venta actual.
+        for det in venta.detalles:
+            if det.producto_id is not None and det.producto is not None:
+                det.producto.stock += det.cantidad
+                det.producto.estado = calculate_stock_status(
+                    det.producto.stock, det.producto.stock_minimo
+                )
+        if venta.cliente_id is not None:
+            PuntosService(self.db).revertir_por_venta(venta.cliente_id, venta.id)
+
+        # 2. Construir nuevas líneas (valida contra el stock ya repuesto).
+        subtotal, detalles, productos_cant = self._construir_lineas(data.items)
+        descuento_aplicado = self._calcular_descuento(
+            subtotal, data.descuento, data.descuento_tipo
+        )
+        total = (subtotal - descuento_aplicado).quantize(Decimal("0.01"))
+        if total < 0:
+            total = Decimal("0.00")
+
+        # 3. Resolver cliente y tipo de pago.
+        es_credito = data.tipo_pago == TipoPago.CREDITO
+        cliente_id = data.cliente_id
+        if es_credito:
+            if cliente_id is None:
+                raise CreditoSinClienteError()
+            if self.cliente_repository.get_by_id(cliente_id) is None:
+                raise ClienteNotFoundError()
+        elif cliente_id is not None:
+            if self.cliente_repository.get_by_id(cliente_id) is None:
+                raise ClienteNotFoundError()
+        elif data.cliente_nombre or data.cliente_documento:
+            cliente_id = self._resolver_cliente_rapido(
+                data.cliente_nombre, data.cliente_documento
+            )
+
+        # Saldo: en crédito, total menos lo ya abonado (nunca negativo).
+        pagado = sum((Decimal(a.monto) for a in venta.abonos), Decimal("0.00"))
+        if es_credito:
+            saldo = (total - pagado).quantize(Decimal("0.01"))
+            if saldo < 0:
+                saldo = Decimal("0.00")
+        else:
+            saldo = Decimal("0.00")
+
+        # 4. Reemplazar el detalle (cascade delete-orphan borra los anteriores).
+        venta.detalles = [
+            DetalleVenta(
+                producto_id=d.get("producto_id"),
+                descripcion_libre=d.get("descripcion_libre"),
+                cantidad=d["cantidad"],
+                precio=d["precio"],
+                costo_unitario=d.get("costo_unitario", Decimal("0.00")),
+                subtotal=d["subtotal"],
+            )
+            for d in detalles
+        ]
+        venta.subtotal = subtotal
+        venta.descuento = descuento_aplicado
+        venta.descuento_tipo = (
+            data.descuento_tipo.value if data.descuento_tipo else None
+        )
+        venta.total = total
+        venta.metodo_pago = data.metodo_pago.value
+        venta.tipo_pago = data.tipo_pago.value
+        venta.cliente_id = cliente_id
+        venta.saldo_pendiente = saldo
+
+        # 5. Descontar el stock nuevo.
+        for producto, cantidad in productos_cant:
+            producto.stock -= cantidad
+            producto.estado = calculate_stock_status(
+                producto.stock, producto.stock_minimo
+            )
+
+        # 6. Re-otorgar puntos según el total final.
+        if cliente_id is not None:
+            PuntosService(self.db).otorgar_por_venta(cliente_id, total, venta.id)
+
+        self.db.commit()
+        return self.repository.get_by_id(venta_id)  # type: ignore[return-value]
+
+    def _construir_lineas(self, items) -> tuple[Decimal, list[dict], list[tuple]]:
+        """
+        Valida los items de una venta y construye las líneas de detalle.
+
+        Devuelve (subtotal, detalles, productos_cant) donde:
+        - subtotal: suma de las líneas (Decimal, 2 decimales).
+        - detalles: lista de dicts para crear DetalleVenta.
+        - productos_cant: [(producto, cantidad)] para descontar stock luego.
+
+        Valida existencia y stock de cada producto registrado. Las líneas libres
+        (producto_id None) usan el precio escrito a mano y no controlan stock.
+        """
+        subtotal = Decimal("0.00")
+        detalles: list[dict] = []
+        productos_cant: list[tuple] = []
+
+        for item in items:
+            # --- Línea libre (producto NO registrado, escrito a mano) --------
+            if item.producto_id is None:
+                precio = Decimal(item.precio)
+                costo = Decimal(item.costo) if item.costo is not None else Decimal("0.00")
+                linea_subtotal = (precio * item.cantidad).quantize(Decimal("0.01"))
+                subtotal += linea_subtotal
+                detalles.append(
+                    {
+                        "producto_id": None,
+                        "descripcion_libre": item.descripcion,
+                        "cantidad": item.cantidad,
+                        "precio": precio,
+                        "costo_unitario": costo,
+                        "subtotal": linea_subtotal,
+                    }
+                )
+                continue
+
+            # --- Producto registrado: precio del servidor + control de stock -
+            producto = self.producto_repository.get_by_id(item.producto_id)
+            if producto is None:
+                raise ProductoNotFoundError(
+                    f"Producto {item.producto_id} no encontrado"
+                )
+            if item.cantidad > producto.stock:
+                raise StockInsuficienteError(
+                    f"Stock insuficiente para '{producto.nombre}' "
+                    f"(disponible: {producto.stock}, solicitado: {item.cantidad})"
+                )
+
+            precio = Decimal(producto.precio_venta)
+            costo = Decimal(producto.precio_compra)
+            linea_subtotal = (precio * item.cantidad).quantize(Decimal("0.01"))
+            subtotal += linea_subtotal
+            detalles.append(
+                {
+                    "producto_id": producto.id,
+                    "cantidad": item.cantidad,
+                    "precio": precio,
+                    "costo_unitario": costo,
+                    "subtotal": linea_subtotal,
+                }
+            )
+            productos_cant.append((producto, item.cantidad))
+
+        return subtotal.quantize(Decimal("0.01")), detalles, productos_cant
 
     def _resolver_cliente_rapido(
         self, nombre: Optional[str], documento: Optional[str]

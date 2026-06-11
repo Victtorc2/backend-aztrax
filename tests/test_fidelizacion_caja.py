@@ -201,3 +201,58 @@ class TestAnularVenta:
         }, headers=auth).json()
         assert client.post(f"/ventas/{venta['id']}/anular", json={}, headers=auth).status_code == 200
         assert client.post(f"/ventas/{venta['id']}/anular", json={}, headers=auth).status_code == 409
+
+
+class TestEditarVenta:
+    def test_editar_ajusta_stock_total_y_puntos(self, client, auth):
+        p = _crear_producto(client, auth, precio=50, stock=30)
+        cli = _crear_cliente(client, auth)
+        venta = client.post("/ventas", json={
+            "items": [{"producto_id": p["id"], "cantidad": 2}],  # total 100 -> 10 pts
+            "cliente_id": cli["id"],
+        }, headers=auth).json()
+        assert client.get(f"/productos/{p['id']}", headers=auth).json()["stock"] == 28
+        assert client.get(f"/clientes/{cli['id']}/puntos", headers=auth).json()["puntos"] == 10
+
+        # Editar: ahora 5 unidades.
+        r = client.put(f"/ventas/{venta['id']}", json={
+            "items": [{"producto_id": p["id"], "cantidad": 5}],  # total 250 -> 25 pts
+            "cliente_id": cli["id"],
+        }, headers=auth)
+        assert r.status_code == 200, r.text
+        assert r.json()["numero_boleta"] == venta["numero_boleta"]  # misma boleta
+        assert float(r.json()["total"]) == 250.0
+
+        # Stock: 30 - 5 = 25 (repuso 2, descontó 5). Puntos recomputados a 25.
+        assert client.get(f"/productos/{p['id']}", headers=auth).json()["stock"] == 25
+        assert client.get(f"/clientes/{cli['id']}/puntos", headers=auth).json()["puntos"] == 25
+
+    def test_editar_quitar_linea(self, client, auth):
+        p1 = _crear_producto(client, auth, precio=40, stock=20)
+        p2 = _crear_producto(client, auth, precio=30, stock=20)
+        venta = client.post("/ventas", json={
+            "items": [
+                {"producto_id": p1["id"], "cantidad": 1},
+                {"producto_id": p2["id"], "cantidad": 1},
+            ],
+        }, headers=auth).json()
+
+        # Editar dejando solo el primer producto.
+        r = client.put(f"/ventas/{venta['id']}", json={
+            "items": [{"producto_id": p1["id"], "cantidad": 1}],
+        }, headers=auth)
+        assert r.status_code == 200
+        assert float(r.json()["total"]) == 40.0
+        # El stock del producto quitado se repone por completo.
+        assert client.get(f"/productos/{p2['id']}", headers=auth).json()["stock"] == 20
+
+    def test_editar_anulada_409(self, client, auth):
+        p = _crear_producto(client, auth)
+        venta = client.post("/ventas", json={
+            "items": [{"producto_id": p["id"], "cantidad": 1}],
+        }, headers=auth).json()
+        client.post(f"/ventas/{venta['id']}/anular", json={}, headers=auth)
+        r = client.put(f"/ventas/{venta['id']}", json={
+            "items": [{"producto_id": p["id"], "cantidad": 2}],
+        }, headers=auth)
+        assert r.status_code == 409

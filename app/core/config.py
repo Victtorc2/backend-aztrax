@@ -117,6 +117,13 @@ class Settings(BaseSettings):
     PUNTOS_SOLES_POR_PUNTO: int = 10
 
     # ------------------------------------------------------------------
+    # EDICIÓN DE VENTAS (BOLETA)
+    # ------------------------------------------------------------------
+    # Plazo máximo (en días) durante el cual se puede modificar una venta
+    # después de registrada. Pasado ese plazo, la boleta queda en firme.
+    VENTA_EDIT_DIAS: int = 3
+
+    # ------------------------------------------------------------------
     # CONFIG PYDANTIC
     # ------------------------------------------------------------------
     model_config = SettingsConfigDict(

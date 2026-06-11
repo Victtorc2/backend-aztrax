@@ -74,6 +74,31 @@ def registrar_abono(
     return CreditoService(db).registrar_abono(venta_id, data)
 
 
+@router.put(
+    "/{venta_id}",
+    response_model=VentaDetalleResponse,
+    summary="Modificar una venta (boleta) dentro del plazo permitido",
+)
+def editar_venta(
+    venta_id: int,
+    data: VentaCreate,
+    db: Annotated[Session, Depends(get_db)],
+    _: CurrentUser,
+) -> VentaDetalleResponse:
+    """
+    Modifica una venta ya registrada (corregir productos, cantidades, descuento
+    o forma de pago) dentro del plazo configurado (por defecto 3 días).
+
+    Recalcula el stock (repone el anterior y descuenta el nuevo), los totales y
+    los puntos. Conserva el número de boleta y la fecha original.
+
+    Errores: **404** venta inexistente; **409** anulada o fuera de plazo;
+    **400** stock insuficiente o venta inválida.
+    """
+    venta = VentaService(db).editar_venta(venta_id, data)
+    return VentaDetalleResponse.from_venta(venta)
+
+
 @router.post(
     "/{venta_id}/anular",
     response_model=VentaDetalleResponse,
