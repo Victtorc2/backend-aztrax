@@ -9,7 +9,7 @@ categorías y marcas para filtrar, y banners de promociones.
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -45,17 +45,35 @@ def listar_productos_catalogo(
     modelo: Annotated[Optional[str], Query(description="Filtrar por modelo exacto (para ver sus colores)")] = None,
     search: Annotated[Optional[str], Query(description="Buscar por nombre, marca, modelo o color")] = None,
     solo_destacados: Annotated[bool, Query(description="Solo productos destacados")] = False,
+    orden: Annotated[
+        str,
+        Query(description="Orden: destacados | precio_asc | precio_desc | nombre | reciente"),
+    ] = "destacados",
     page: Annotated[int, Query(ge=1, description="Número de página (1-indexada)")] = 1,
     page_size: Annotated[int, Query(ge=1, le=100, description="Productos por página")] = 10,
 ) -> CatalogoProductosPaginados:
     """
     Devuelve los productos activos (incluidos los agotados) paginados, por
     defecto 10 por página. Filtros opcionales: categoría, marca, búsqueda y
-    destacados. Los destacados se ordenan primero.
+    destacados.
+
+    Los productos agotados siempre se muestran al final. Dentro de los
+    disponibles, `orden` controla el criterio: `destacados` (por defecto:
+    destacados primero, luego A-Z), `precio_asc`, `precio_desc`, `nombre` o
+    `reciente`.
 
     Devuelve un objeto con `items` y los metadatos `total`, `page`,
     `page_size` y `total_pages`.
     """
+    # Los agotados van siempre al final (0 = disponible/bajo stock, 1 = agotado).
+    agotado_last = case((Producto.estado == "agotado", 1), else_=0).asc()
+    criterios = {
+        "precio_asc": (Producto.precio_venta.asc(), Producto.nombre.asc()),
+        "precio_desc": (Producto.precio_venta.desc(), Producto.nombre.asc()),
+        "nombre": (Producto.nombre.asc(),),
+        "reciente": (Producto.created_at.desc(), Producto.id.desc()),
+    }
+    orden_cols = criterios.get(orden, (Producto.destacado.desc(), Producto.nombre.asc()))
     # Filtros comunes, aplicados tanto al conteo como a la página de datos.
     def aplicar_filtros(stmt):
         if categoria_id is not None:
@@ -86,7 +104,7 @@ def listar_productos_catalogo(
     stmt = aplicar_filtros(
         select(Producto)
         .where(Producto.is_active.is_(True))
-        .order_by(Producto.destacado.desc(), Producto.nombre.asc())
+        .order_by(agotado_last, *orden_cols)
     ).offset((page - 1) * page_size).limit(page_size)
 
     productos = db.scalars(stmt).all()
