@@ -21,6 +21,7 @@ from app.schemas.catalogo import (
     CatalogoBannerResponse,
     CatalogoCategoriaResponse,
     CatalogoMarcaResponse,
+    CatalogoModeloResponse,
     CatalogoProducto,
     CatalogoProductosPaginados,
 )
@@ -41,7 +42,8 @@ def listar_productos_catalogo(
     db: Annotated[Session, Depends(get_db)],
     categoria_id: Annotated[Optional[int], Query(description="Filtrar por categoría")] = None,
     marca: Annotated[Optional[str], Query(description="Filtrar por marca exacta")] = None,
-    search: Annotated[Optional[str], Query(description="Buscar por nombre, marca o modelo")] = None,
+    modelo: Annotated[Optional[str], Query(description="Filtrar por modelo exacto (para ver sus colores)")] = None,
+    search: Annotated[Optional[str], Query(description="Buscar por nombre, marca, modelo o color")] = None,
     solo_destacados: Annotated[bool, Query(description="Solo productos destacados")] = False,
     page: Annotated[int, Query(ge=1, description="Número de página (1-indexada)")] = 1,
     page_size: Annotated[int, Query(ge=1, le=100, description="Productos por página")] = 10,
@@ -60,6 +62,8 @@ def listar_productos_catalogo(
             stmt = stmt.where(Producto.categoria_id == categoria_id)
         if marca and marca.strip():
             stmt = stmt.where(Producto.marca == marca.strip())
+        if modelo and modelo.strip():
+            stmt = stmt.where(func.lower(Producto.modelo) == modelo.strip().lower())
         if solo_destacados:
             stmt = stmt.where(Producto.destacado.is_(True))
         if search and search.strip():
@@ -68,6 +72,7 @@ def listar_productos_catalogo(
                 func.lower(Producto.nombre).like(pattern)
                 | func.lower(Producto.marca).like(pattern)
                 | func.lower(Producto.modelo).like(pattern)
+                | func.lower(Producto.color).like(pattern)
             )
         return stmt
 
@@ -88,7 +93,8 @@ def listar_productos_catalogo(
     items = [
         CatalogoProducto(
             id=p.id, codigo=p.codigo, nombre=p.nombre, marca=p.marca,
-            modelo=p.modelo, categoria=p.categoria.nombre, precio_venta=p.precio_venta,
+            modelo=p.modelo, color=p.color, categoria=p.categoria.nombre,
+            precio_venta=p.precio_venta,
             stock=p.stock, estado=p.estado, representacion=p.representacion,
             imagen_url=p.imagen_url, destacado=p.destacado,
             descripcion=p.descripcion, ficha_tecnica=p.ficha_tecnica,
@@ -146,6 +152,55 @@ def listar_marcas_catalogo(
         stmt = stmt.where(Producto.categoria_id == categoria_id)
     rows = db.execute(stmt).all()
     return [CatalogoMarcaResponse(nombre=r.marca, cantidad_productos=r.cantidad) for r in rows]
+
+
+@router.get(
+    "/modelos",
+    response_model=list[CatalogoModeloResponse],
+    summary="Modelos de una marca (con cantidad de colores e imagen)",
+)
+def listar_modelos_catalogo(
+    db: Annotated[Session, Depends(get_db)],
+    marca: Annotated[str, Query(description="Marca de la que se listan los modelos")],
+    categoria_id: Annotated[Optional[int], Query(description="Acotar a una categoría")] = None,
+) -> list[CatalogoModeloResponse]:
+    """
+    Devuelve los modelos de una marca para la navegación encadenada del
+    catálogo: Categoría → Marca → **Modelo** → colores.
+
+    Por cada modelo incluye la cantidad de variantes (colores), una imagen
+    representativa y el precio más bajo. Los productos sin modelo se omiten.
+    Tras elegir un modelo, se piden sus colores con
+    `GET /catalogo/productos?marca=...&modelo=...`.
+    """
+    stmt = (
+        select(
+            Producto.modelo.label("modelo"),
+            func.count(Producto.id).label("cantidad"),
+            # MAX ignora NULL: devuelve una imagen no nula si alguna existe.
+            func.max(Producto.imagen_url).label("imagen_url"),
+            func.min(Producto.precio_venta).label("precio_desde"),
+        )
+        .where(
+            Producto.is_active.is_(True),
+            Producto.modelo.is_not(None),
+            func.lower(Producto.marca) == marca.strip().lower(),
+        )
+        .group_by(Producto.modelo)
+        .order_by(Producto.modelo.asc())
+    )
+    if categoria_id is not None:
+        stmt = stmt.where(Producto.categoria_id == categoria_id)
+    rows = db.execute(stmt).all()
+    return [
+        CatalogoModeloResponse(
+            modelo=r.modelo,
+            cantidad_productos=r.cantidad,
+            imagen_url=r.imagen_url,
+            precio_desde=r.precio_desde,
+        )
+        for r in rows
+    ]
 
 
 @router.get(

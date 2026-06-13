@@ -5,6 +5,33 @@ Verifican que los endpoints abiertos (con API key) devuelvan los datos
 correctos y que los filtros (categoría, marca, destacados) funcionen.
 """
 
+import pytest
+
+
+@pytest.fixture(scope="module")
+def variantes_daiwa(client, auth, seed):
+    """
+    Crea, una sola vez, dos modelos de la marca 'Daiwa': 'Tournament' con dos
+    colores y 'Steez' con uno. La BD se comparte en la sesión, por lo que se
+    crean en un fixture de módulo para no duplicar entre tests.
+    """
+    cat_id = seed["categoria"]["id"]
+    prov_id = seed["proveedor"]["id"]
+    variantes = [
+        ("Daiwa", "Tournament", "Verde fluor", 40),
+        ("Daiwa", "Tournament", "Azul metálico", 42),
+        ("Daiwa", "Steez", "Rojo", 60),
+    ]
+    for marca, modelo, color, precio in variantes:
+        r = client.post("/productos", json={
+            "nombre": f"{marca} {modelo} {color}", "marca": marca,
+            "modelo": modelo, "color": color,
+            "categoria_id": cat_id, "proveedor_id": prov_id,
+            "precio_compra": round(precio * 0.6, 2), "precio_venta": precio,
+            "stock": 5, "stock_minimo": 1,
+        }, headers=auth)
+        assert r.status_code == 201, r.text
+
 
 class TestCatalogoAcceso:
     """Acceso y autenticación del catálogo."""
@@ -123,3 +150,35 @@ class TestCatalogoMarcas:
         marcas = client.get("/catalogo/marcas", params={"categoria_id": cat_id}, headers=catalog_headers).json()
         nombres = [m["nombre"] for m in marcas]
         assert "Rapala" in nombres
+
+
+class TestCatalogoModelos:
+    """Navegación Categoría → Marca → Modelo → colores."""
+
+    def test_producto_expone_color(self, client, catalog_headers, variantes_daiwa):
+        """El catálogo devuelve el nuevo campo `color`."""
+        prods = client.get("/catalogo/productos", params={"marca": "Daiwa"}, headers=catalog_headers).json()["items"]
+        assert prods, "No se encontraron productos de la marca"
+        assert all("color" in p for p in prods)
+        assert any(p["color"] == "Verde fluor" for p in prods)
+
+    def test_modelos_de_una_marca(self, client, catalog_headers, variantes_daiwa):
+        """`/catalogo/modelos?marca=` agrupa por modelo con cantidad de colores."""
+        modelos = client.get("/catalogo/modelos", params={"marca": "Daiwa"}, headers=catalog_headers).json()
+        por_modelo = {m["modelo"]: m for m in modelos}
+        assert "Tournament" in por_modelo and "Steez" in por_modelo
+        # Tournament tiene 2 colores; Steez, 1.
+        assert por_modelo["Tournament"]["cantidad_productos"] == 2
+        assert por_modelo["Steez"]["cantidad_productos"] == 1
+        # precio_desde = el más bajo de las variantes del modelo.
+        assert float(por_modelo["Tournament"]["precio_desde"]) == 40
+
+    def test_colores_de_un_modelo(self, client, catalog_headers, variantes_daiwa):
+        """Tras elegir un modelo, sus colores se piden filtrando productos."""
+        prods = client.get("/catalogo/productos", params={
+            "marca": "Daiwa", "modelo": "Tournament",
+        }, headers=catalog_headers).json()["items"]
+        assert len(prods) == 2
+        colores = {p["color"] for p in prods}
+        assert colores == {"Verde fluor", "Azul metálico"}
+        assert all(p["modelo"] == "Tournament" for p in prods)
