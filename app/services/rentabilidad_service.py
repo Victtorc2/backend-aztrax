@@ -74,6 +74,8 @@ class RentabilidadService:
                 Producto.codigo,
                 Producto.nombre,
                 Producto.marca,
+                Producto.modelo,
+                Producto.color,
                 func.sum(DetalleVenta.cantidad).label("unidades"),
                 func.sum(DetalleVenta.subtotal).label("ingresos"),
                 func.sum(DetalleVenta.costo_unitario * DetalleVenta.cantidad).label(
@@ -82,7 +84,10 @@ class RentabilidadService:
             )
             .join(DetalleVenta, DetalleVenta.producto_id == Producto.id)
             .join(Venta, Venta.id == DetalleVenta.venta_id)
-            .group_by(Producto.id, Producto.codigo, Producto.nombre, Producto.marca)
+            .group_by(
+                Producto.id, Producto.codigo, Producto.nombre, Producto.marca,
+                Producto.modelo, Producto.color,
+            )
         )
         stmt = self._aplicar_rango(stmt, desde, hasta)
 
@@ -98,6 +103,8 @@ class RentabilidadService:
                     codigo=row.codigo,
                     nombre=row.nombre,
                     marca=row.marca,
+                    modelo=row.modelo,
+                    color=row.color,
                     unidades_vendidas=int(row.unidades or 0),
                     ingresos=ingresos,
                     costo=costo,

@@ -178,13 +178,18 @@ class DashboardService:
                 Producto.codigo,
                 Producto.nombre,
                 Producto.marca,
+                Producto.modelo,
+                Producto.color,
                 func.sum(DetalleVenta.cantidad).label("unidades"),
                 func.sum(DetalleVenta.subtotal).label("monto"),
             )
             .join(DetalleVenta, DetalleVenta.producto_id == Producto.id)
             .join(Venta, Venta.id == DetalleVenta.venta_id)
             .where(Venta.anulada.is_(False))
-            .group_by(Producto.id, Producto.codigo, Producto.nombre, Producto.marca)
+            .group_by(
+                Producto.id, Producto.codigo, Producto.nombre, Producto.marca,
+                Producto.modelo, Producto.color,
+            )
             .order_by(func.sum(DetalleVenta.cantidad).desc())
             .limit(limite)
         )
@@ -195,6 +200,8 @@ class DashboardService:
                 codigo=row.codigo,
                 nombre=row.nombre,
                 marca=row.marca,
+                modelo=row.modelo,
+                color=row.color,
                 unidades_vendidas=int(row.unidades or 0),
                 monto_vendido=_money(row.monto),
             )

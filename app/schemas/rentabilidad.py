@@ -25,6 +25,8 @@ class RentabilidadProducto(BaseModel):
     codigo: str
     nombre: str
     marca: str
+    modelo: Optional[str] = None
+    color: Optional[str] = None
     unidades_vendidas: int
     ingresos: Decimal          # suma de subtotales vendidos
     costo: Decimal             # suma de (costo_unitario * cantidad)

@@ -224,6 +224,7 @@ class ProductoPorPedirResponse(BaseModel):
     codigo: str
     nombre: str
     modelo: Optional[str] = None
+    color: Optional[str] = None
     stock: int
     stock_minimo: int
     estado: EstadoProducto
@@ -240,6 +241,7 @@ class ProductoPorPedirResponse(BaseModel):
             codigo=producto.codigo,
             nombre=producto.nombre,
             modelo=producto.modelo,
+            color=producto.color,
             stock=producto.stock,
             stock_minimo=producto.stock_minimo,
             estado=EstadoProducto(producto.estado),

@@ -8,6 +8,7 @@ tarjetas de KPIs y gráficos en el frontend.
 
 from datetime import date
 from decimal import Decimal
+from typing import Optional
 
 from pydantic import BaseModel
 
@@ -48,6 +49,8 @@ class TopProducto(BaseModel):
     codigo: str
     nombre: str
     marca: str
+    modelo: Optional[str] = None
+    color: Optional[str] = None
     unidades_vendidas: int
     monto_vendido: Decimal
 
