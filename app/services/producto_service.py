@@ -91,6 +91,7 @@ class ProductoService:
             nombre=data.nombre,
             marca=data.marca,
             modelo=data.modelo,
+            color=data.color,
             categoria_id=data.categoria_id,
             proveedor_id=data.proveedor_id,
             precio_compra=data.precio_compra,

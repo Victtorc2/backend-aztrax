@@ -57,6 +57,13 @@ class Producto(Base):
         String(100), index=True, nullable=True
     )
 
+    # Color del producto: opcional. En el dominio de señuelos, un mismo modelo
+    # viene en varios colores; cada color es un producto distinto. Indexado
+    # porque también se usa en búsquedas y en la navegación del catálogo.
+    color: Mapped[Optional[str]] = mapped_column(
+        String(100), index=True, nullable=True
+    )
+
     # URL/ruta de la imagen del producto (relativa a /uploads/productos/).
     imagen_url: Mapped[Optional[str]] = mapped_column(
         String(255), nullable=True

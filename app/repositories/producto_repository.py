@@ -108,6 +108,7 @@ class ProductoRepository:
                     Producto.nombre.ilike(patron),
                     Producto.marca.ilike(patron),
                     Producto.modelo.ilike(patron),
+                    Producto.color.ilike(patron),
                 )
             )
         if categoria_id is not None:
@@ -248,6 +249,7 @@ class ProductoRepository:
                     Producto.codigo.ilike(patron),
                     Producto.marca.ilike(patron),
                     Producto.modelo.ilike(patron),
+                    Producto.color.ilike(patron),
                 ),
             )
             .options(*self._eager())
@@ -271,6 +273,7 @@ class ProductoRepository:
         stock_minimo: int,
         estado: str,
         modelo: Optional[str] = None,
+        color: Optional[str] = None,
         representacion: str = "unidad",
         descripcion: Optional[str] = None,
         ficha_tecnica: Optional[str] = None,
@@ -281,6 +284,7 @@ class ProductoRepository:
             nombre=nombre,
             marca=marca,
             modelo=modelo,
+            color=color,
             categoria_id=categoria_id,
             proveedor_id=proveedor_id,
             precio_compra=precio_compra,

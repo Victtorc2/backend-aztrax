@@ -40,6 +40,9 @@ class ProductoCreate(BaseModel):
     modelo: Optional[str] = Field(
         default=None, max_length=100, examples=["Botella 3L retornable"]
     )
+    color: Optional[str] = Field(
+        default=None, max_length=100, examples=["Verde fluor"]
+    )
     categoria_id: int = Field(..., gt=0, examples=[1])
     proveedor_id: int = Field(..., gt=0, examples=[2])
     # Precios monetarios: deben ser positivos (> 0).
@@ -64,9 +67,9 @@ class ProductoCreate(BaseModel):
     def _v_texto(cls, v: str) -> str:
         return _limpiar_obligatorio(v)
 
-    @field_validator("modelo")
+    @field_validator("modelo", "color")
     @classmethod
-    def _v_modelo(cls, v: Optional[str]) -> Optional[str]:
+    def _v_opcional(cls, v: Optional[str]) -> Optional[str]:
         # Campo opcional: si llega vacío o solo espacios, se guarda como None.
         if v is None:
             return None
@@ -83,6 +86,7 @@ class ProductoUpdate(BaseModel):
     nombre: Optional[str] = Field(default=None, min_length=1, max_length=150)
     marca: Optional[str] = Field(default=None, min_length=1, max_length=100)
     modelo: Optional[str] = Field(default=None, max_length=100)
+    color: Optional[str] = Field(default=None, max_length=100)
     categoria_id: Optional[int] = Field(default=None, gt=0)
     proveedor_id: Optional[int] = Field(default=None, gt=0)
     precio_compra: Optional[Decimal] = Field(
@@ -103,9 +107,9 @@ class ProductoUpdate(BaseModel):
     def _v_texto(cls, v: Optional[str]) -> Optional[str]:
         return _limpiar_obligatorio(v) if v is not None else None
 
-    @field_validator("modelo")
+    @field_validator("modelo", "color")
     @classmethod
-    def _v_modelo(cls, v: Optional[str]) -> Optional[str]:
+    def _v_opcional(cls, v: Optional[str]) -> Optional[str]:
         # Opcional: cadena vacía o espacios -> None (permite "limpiar" el campo).
         if v is None:
             return None
@@ -125,6 +129,7 @@ class ProductoResponse(BaseModel):
     nombre: str
     marca: str
     modelo: Optional[str]
+    color: Optional[str]
     categoria: str
     proveedor: str
     precio_compra: Decimal
@@ -156,6 +161,7 @@ class ProductoResponse(BaseModel):
             nombre=producto.nombre,
             marca=producto.marca,
             modelo=producto.modelo,
+            color=producto.color,
             categoria=producto.categoria.nombre,
             proveedor=producto.proveedor.nombre,
             precio_compra=producto.precio_compra,
