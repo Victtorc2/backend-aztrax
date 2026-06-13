@@ -66,12 +66,15 @@ def _wrap(text: str, font: str, size: int, max_width: float) -> list[str]:
 
 def _nombre_item(d) -> str:
     """
-    Nombre a imprimir de una línea: el del producto (con su marca si tiene),
-    o la descripción escrita a mano si es una línea libre (sin producto).
+    Nombre a imprimir de una línea: el del producto (con marca, modelo y color
+    si tiene), o la descripción escrita a mano si es una línea libre.
     """
     if d.producto is not None:
-        if d.producto.marca:
-            return f"{d.producto.nombre} - {d.producto.marca}"
+        detalles = [
+            p for p in (d.producto.marca, d.producto.modelo, d.producto.color) if p
+        ]
+        if detalles:
+            return f"{d.producto.nombre} - {' / '.join(detalles)}"
         return d.producto.nombre
     return d.descripcion_libre or "Venta libre"
 

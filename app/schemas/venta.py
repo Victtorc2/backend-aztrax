@@ -136,6 +136,8 @@ class DetalleHistorialResponse(BaseModel):
     producto_id: Optional[int]   # None en líneas libres (sin producto registrado)
     producto: str                # nombre del producto o descripción libre
     marca: str
+    modelo: Optional[str] = None # modelo del producto (None en líneas libres)
+    color: Optional[str] = None  # color del producto (None en líneas libres)
     codigo: str
     es_libre: bool               # True si es una línea escrita a mano
     cantidad: int
@@ -158,6 +160,8 @@ class DetalleHistorialResponse(BaseModel):
                 producto_id=d.producto_id,
                 producto=d.producto.nombre,
                 marca=d.producto.marca,
+                modelo=d.producto.modelo,
+                color=d.producto.color,
                 codigo=d.producto.codigo,
                 es_libre=False,
                 cantidad=d.cantidad,
