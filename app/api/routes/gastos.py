@@ -1,13 +1,15 @@
 """
 Rutas del módulo de gastos / egresos de dinero (protegidas con JWT).
 
-    POST   /gastos          -> registrar un gasto (salida de dinero)
-    GET    /gastos          -> listar gastos con filtros
-    GET    /gastos/saldo    -> dinero disponible por método (efectivo/yape)
-    DELETE /gastos/{id}     -> eliminar un gasto
+    POST   /gastos           -> registrar un gasto (salida de dinero)
+    GET    /gastos           -> listar gastos con filtros
+    GET    /gastos/saldo     -> dinero disponible por método (efectivo/yape)
+    POST   /gastos/ajustes   -> agregar o modificar el saldo (con motivo)
+    GET    /gastos/ajustes   -> historial de ajustes de saldo
+    DELETE /gastos/{id}      -> eliminar un gasto
 
-La ruta estática `/gastos/saldo` se declara ANTES que la dinámica `/gastos/{id}`
-para que no la capture la ruta con parámetro.
+Las rutas estáticas (`/gastos/saldo`, `/gastos/ajustes`) se declaran ANTES que
+la dinámica `/gastos/{id}` para que no las capture la ruta con parámetro.
 
 Los endpoints son delgados: la lógica vive en GastoService.
 """
@@ -21,6 +23,8 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.dependencies.auth import CurrentUser, get_current_user
 from app.schemas.gasto import (
+    AjusteSaldoCreate,
+    AjusteSaldoResponse,
     CategoriaGasto,
     GastoCreate,
     GastoResponse,
@@ -73,6 +77,47 @@ def obtener_saldo(
     con ese método (todo sobre ventas no anuladas).
     """
     return GastoService(db).saldo()
+
+
+@router.post(
+    "/ajustes",
+    response_model=SaldoResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Agregar o modificar el saldo de un método (con motivo)",
+)
+def ajustar_saldo(
+    data: AjusteSaldoCreate,
+    db: Annotated[Session, Depends(get_db)],
+    _: CurrentUser,
+) -> SaldoResponse:
+    """
+    Ajusta manualmente el saldo de un método de pago, guardando una
+    especificación (motivo):
+
+    - `modo="agregar"`: suma el monto al saldo actual.
+    - `modo="establecer"`: fija el saldo a ese monto (registra la diferencia).
+
+    Devuelve el saldo actualizado. **400** si el ajuste no cambia el saldo.
+    """
+    return GastoService(db).registrar_ajuste(data)
+
+
+@router.get(
+    "/ajustes",
+    response_model=list[AjusteSaldoResponse],
+    summary="Historial de ajustes de saldo",
+)
+def listar_ajustes(
+    db: Annotated[Session, Depends(get_db)],
+    _: CurrentUser,
+    metodo_pago: Annotated[
+        Optional[MetodoPagoGasto], Query(description="Filtrar por método de pago")
+    ] = None,
+) -> list[AjusteSaldoResponse]:
+    """Lista los ajustes de saldo, más recientes primero."""
+    return GastoService(db).listar_ajustes(
+        metodo_pago=metodo_pago.value if metodo_pago else None,
+    )
 
 
 @router.get(

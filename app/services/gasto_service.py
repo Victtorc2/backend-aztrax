@@ -15,14 +15,22 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from app.core.exceptions import GastoNotFoundError, ProveedorNotFoundError
+from app.core.exceptions import (
+    AjusteSaldoInvalidoError,
+    GastoNotFoundError,
+    ProveedorNotFoundError,
+)
+from app.models.ajuste_saldo import AjusteSaldo
 from app.models.gasto import Gasto
 from app.repositories.caja_repository import CajaRepository
 from app.repositories.gasto_repository import GastoRepository
 from app.repositories.proveedor_repository import ProveedorRepository
 from app.schemas.gasto import (
+    AjusteSaldoCreate,
+    AjusteSaldoResponse,
     GastoCreate,
     GastoResponse,
+    ModoAjusteSaldo,
     SaldoMetodo,
     SaldoResponse,
 )
@@ -105,12 +113,22 @@ class GastoService:
         ventas = self.repo.ventas_contado_por_metodo()
         abonos = self.repo.abonos_por_metodo()
         gastos = self.repo.gastos_por_metodo()
+        ajustes = self.repo.ajustes_por_metodo()
 
         def _metodo(nombre: str) -> SaldoMetodo:
             ingresos = (
                 ventas.get(nombre, _CERO) + abonos.get(nombre, _CERO)
-            ).quantize(Decimal("0.01"))
-            egresos = gastos.get(nombre, _CERO).quantize(Decimal("0.01"))
+            )
+            egresos = gastos.get(nombre, _CERO)
+            # Los ajustes con signo se reparten en ingresos/egresos para que
+            # el saldo siga cumpliendo saldo = ingresos − egresos.
+            ajuste = ajustes.get(nombre, _CERO)
+            if ajuste >= _CERO:
+                ingresos += ajuste
+            else:
+                egresos += -ajuste
+            ingresos = ingresos.quantize(Decimal("0.01"))
+            egresos = egresos.quantize(Decimal("0.01"))
             return SaldoMetodo(
                 ingresos=ingresos,
                 egresos=egresos,
@@ -124,6 +142,58 @@ class GastoService:
             yape=yape,
             total=(efectivo.saldo + yape.saldo).quantize(Decimal("0.01")),
         )
+
+    # ------------------------------------------------------------------
+    # Ajustes manuales de saldo
+    # ------------------------------------------------------------------
+    def registrar_ajuste(self, data: AjusteSaldoCreate) -> SaldoResponse:
+        """
+        Agrega o modifica el saldo de un método guardando un ajuste con signo.
+
+        - "agregar": suma `monto` (> 0) al saldo.
+        - "establecer": fija el saldo del método a `monto`; se registra la
+          diferencia contra el saldo actual.
+        """
+        metodo = data.metodo_pago.value
+        monto = Decimal(data.monto).quantize(Decimal("0.01"))
+
+        if data.modo is ModoAjusteSaldo.ESTABLECER:
+            actual = self._saldo_metodo(metodo)
+            delta = (monto - actual).quantize(Decimal("0.01"))
+        else:  # AGREGAR
+            if monto <= _CERO:
+                raise AjusteSaldoInvalidoError(
+                    "El monto a agregar debe ser mayor que 0"
+                )
+            delta = monto
+
+        if delta == _CERO:
+            raise AjusteSaldoInvalidoError("El ajuste no cambia el saldo actual")
+
+        self.repo.add_ajuste(
+            AjusteSaldo(
+                metodo_pago=metodo,
+                monto=delta,
+                motivo=data.motivo.strip(),
+            )
+        )
+        self.repo.commit()
+        return self.saldo()
+
+    def listar_ajustes(
+        self, metodo_pago: Optional[str] = None
+    ) -> list[AjusteSaldoResponse]:
+        return [
+            AjusteSaldoResponse.model_validate(a)
+            for a in self.repo.listar_ajustes(metodo_pago=metodo_pago)
+        ]
+
+    def _saldo_metodo(self, metodo: str) -> Decimal:
+        """Saldo actual de un método concreto (reusa el cálculo global)."""
+        saldo = self.saldo()
+        if metodo == "efectivo":
+            return Decimal(saldo.efectivo.saldo).quantize(Decimal("0.01"))
+        return Decimal(saldo.yape.saldo).quantize(Decimal("0.01"))
 
     # ------------------------------------------------------------------
     # Helpers

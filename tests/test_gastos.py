@@ -120,6 +120,55 @@ class TestListarGastos:
         assert all(g["metodo_pago"] == "efectivo" for g in r.json())
 
 
+class TestAjustarSaldo:
+    def test_agregar_sube_saldo(self, client, auth):
+        antes = _saldo(client, auth)
+        r = client.post("/gastos/ajustes", json={
+            "metodo_pago": "efectivo",
+            "modo": "agregar",
+            "monto": 50,
+            "motivo": "Aporte de capital",
+        }, headers=auth)
+        assert r.status_code == 201, r.text
+        despues = r.json()
+        assert round(
+            float(despues["efectivo"]["saldo"])
+            - float(antes["efectivo"]["saldo"]), 2
+        ) == 50.0
+
+    def test_establecer_fija_el_saldo(self, client, auth):
+        r = client.post("/gastos/ajustes", json={
+            "metodo_pago": "yape",
+            "modo": "establecer",
+            "monto": 999.99,
+            "motivo": "Conteo real",
+        }, headers=auth)
+        assert r.status_code == 201, r.text
+        assert float(r.json()["yape"]["saldo"]) == 999.99
+
+    def test_motivo_obligatorio_422(self, client, auth):
+        r = client.post("/gastos/ajustes", json={
+            "metodo_pago": "efectivo", "modo": "agregar", "monto": 10,
+        }, headers=auth)
+        assert r.status_code == 422
+
+    def test_agregar_cero_400(self, client, auth):
+        r = client.post("/gastos/ajustes", json={
+            "metodo_pago": "efectivo", "modo": "agregar", "monto": 0,
+            "motivo": "x",
+        }, headers=auth)
+        assert r.status_code == 400
+
+    def test_historial_registra_el_motivo(self, client, auth):
+        client.post("/gastos/ajustes", json={
+            "metodo_pago": "efectivo", "modo": "agregar", "monto": 5,
+            "motivo": "Prueba de motivo",
+        }, headers=auth)
+        r = client.get("/gastos/ajustes?metodo_pago=efectivo", headers=auth)
+        assert r.status_code == 200
+        assert any(a["motivo"] == "Prueba de motivo" for a in r.json())
+
+
 class TestGastoAfectaCaja:
     def test_gasto_efectivo_baja_esperado_de_caja(self, client, auth):
         # Cerrar cualquier caja abierta de otra prueba.

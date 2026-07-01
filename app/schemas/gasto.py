@@ -70,11 +70,47 @@ class SaldoResponse(BaseModel):
     Dinero disponible por método de pago.
 
     Saldo de cada método = (ventas al contado no anuladas + abonos de ventas no
-    anuladas con ese método) − (gastos con ese método). El fondo de cambio de la
-    caja (monto inicial) NO se incluye: esto refleja el dinero neto generado y
-    gastado por el negocio.
+    anuladas con ese método) − (gastos con ese método) + (ajustes manuales). El
+    fondo de cambio de la caja (monto inicial) NO se incluye: esto refleja el
+    dinero neto generado y gastado por el negocio.
     """
 
     efectivo: SaldoMetodo
     yape: SaldoMetodo
     total: Decimal      # efectivo.saldo + yape.saldo
+
+
+# ---------------------------------------------------------------------------
+# Ajustes manuales del saldo
+# ---------------------------------------------------------------------------
+class ModoAjusteSaldo(str, Enum):
+    """Cómo aplicar el ajuste al saldo del método."""
+
+    AGREGAR = "agregar"        # suma `monto` al saldo actual
+    ESTABLECER = "establecer"  # fija el saldo a `monto` (calcula la diferencia)
+
+
+class AjusteSaldoCreate(BaseModel):
+    """Datos para agregar o modificar el saldo de un método (con motivo)."""
+
+    metodo_pago: MetodoPagoGasto
+    modo: ModoAjusteSaldo = Field(default=ModoAjusteSaldo.AGREGAR)
+    # En modo "agregar": monto a sumar (> 0). En modo "establecer": el nuevo
+    # saldo deseado (>= 0).
+    monto: Decimal = Field(
+        ..., ge=0, max_digits=12, decimal_places=2, examples=[50.00]
+    )
+    # Especificación obligatoria del ajuste.
+    motivo: str = Field(..., min_length=1, max_length=255, examples=["Aporte de capital"])
+
+
+class AjusteSaldoResponse(BaseModel):
+    """Un ajuste manual de saldo registrado."""
+
+    id: int
+    metodo_pago: str
+    monto: Decimal      # con signo (positivo sube el saldo, negativo lo baja)
+    motivo: str
+    fecha: datetime
+
+    model_config = ConfigDict(from_attributes=True)

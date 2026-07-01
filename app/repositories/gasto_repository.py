@@ -15,6 +15,7 @@ from typing import Optional, Sequence
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.models.ajuste_saldo import AjusteSaldo
 from app.models.gasto import Gasto
 from app.models.venta import Abono, Venta
 
@@ -129,3 +130,34 @@ class GastoRepository:
             )
         )
         return Decimal(total or 0).quantize(Decimal("0.01"))
+
+    # ------------------------------------------------------------------
+    # Ajustes manuales de saldo
+    # ------------------------------------------------------------------
+    def add_ajuste(self, ajuste: AjusteSaldo) -> None:
+        self.db.add(ajuste)
+
+    def listar_ajustes(
+        self, metodo_pago: Optional[str] = None, limite: int = 100
+    ) -> Sequence[AjusteSaldo]:
+        """Ajustes de saldo, más recientes primero."""
+        stmt = select(AjusteSaldo)
+        if metodo_pago:
+            stmt = stmt.where(AjusteSaldo.metodo_pago == metodo_pago)
+        stmt = stmt.order_by(
+            AjusteSaldo.fecha.desc(), AjusteSaldo.id.desc()
+        ).limit(limite)
+        return self.db.scalars(stmt).all()
+
+    def ajustes_por_metodo(self) -> dict[str, Decimal]:
+        """Total (con signo) de ajustes manuales agrupado por método de pago."""
+        filas = self.db.execute(
+            select(
+                AjusteSaldo.metodo_pago,
+                func.coalesce(func.sum(AjusteSaldo.monto), 0),
+            ).group_by(AjusteSaldo.metodo_pago)
+        ).all()
+        return {
+            metodo: Decimal(total or 0).quantize(Decimal("0.01"))
+            for metodo, total in filas
+        }

@@ -306,3 +306,10 @@ class GastoNotFoundError(AppException):
 
     status_code = 404
     detail = "Gasto no encontrado"
+
+
+class AjusteSaldoInvalidoError(AppException):
+    """El ajuste de saldo no es válido (monto <= 0 o no cambia el saldo)."""
+
+    status_code = 400
+    detail = "El ajuste de saldo no es válido"
