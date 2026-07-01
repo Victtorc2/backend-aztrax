@@ -8,6 +8,7 @@ efectivo declarado (contado a mano) contra el esperado por el sistema:
              + ventas_en_efectivo (no anuladas, durante la sesión)
              + ingresos_manuales
              − egresos_manuales
+             − gastos_en_efectivo (de la sesión)
 
     diferencia = declarado − esperado   (negativo = falta; positivo = sobra)
 
@@ -26,6 +27,7 @@ from app.core.exceptions import (
 )
 from app.models.caja import Caja, MovimientoCaja
 from app.repositories.caja_repository import CajaRepository
+from app.repositories.gasto_repository import GastoRepository
 from app.schemas.caja import (
     CajaAbrir,
     CajaCerrar,
@@ -44,6 +46,7 @@ class CajaService:
     def __init__(self, db: Session) -> None:
         self.db = db
         self.repo = CajaRepository(db)
+        self.gasto_repo = GastoRepository(db)
 
     # ------------------------------------------------------------------
     # Apertura
@@ -99,9 +102,10 @@ class CajaService:
 
         ahora = datetime.utcnow()
         ventas_ef = self.repo.ventas_efectivo(caja.id)
+        gastos_ef = self.gasto_repo.gastos_efectivo(caja.id)
         ingresos, egresos = self._totales_movimientos(caja)
         esperado = (
-            Decimal(caja.monto_inicial) + ventas_ef + ingresos - egresos
+            Decimal(caja.monto_inicial) + ventas_ef + ingresos - egresos - gastos_ef
         ).quantize(Decimal("0.01"))
         declarado = Decimal(data.monto_declarado).quantize(Decimal("0.01"))
 
@@ -141,9 +145,10 @@ class CajaService:
         ingresos, egresos = self._totales_movimientos(caja)
 
         ventas_ef = self.repo.ventas_efectivo(caja.id)
+        gastos_ef = self.gasto_repo.gastos_efectivo(caja.id)
         if caja.estado == "abierta":
             esperado = (
-                Decimal(caja.monto_inicial) + ventas_ef + ingresos - egresos
+                Decimal(caja.monto_inicial) + ventas_ef + ingresos - egresos - gastos_ef
             ).quantize(Decimal("0.01"))
             declarado = None
             diferencia = None
@@ -159,6 +164,7 @@ class CajaService:
             ventas_efectivo=ventas_ef,
             total_ingresos=ingresos,
             total_egresos=egresos,
+            gastos_efectivo=gastos_ef,
             monto_esperado=esperado,
             monto_declarado=declarado,
             diferencia=diferencia,

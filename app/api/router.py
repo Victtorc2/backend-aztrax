@@ -14,6 +14,7 @@ from app.api.routes import (
     categorias,
     clientes,
     dashboard,
+    gastos,
     proveedores,
     productos,
     por_pedir,
@@ -44,6 +45,8 @@ api_router.include_router(dashboard.router)
 api_router.include_router(clientes.router)
 # Caja diaria (apertura, arqueo y cierre).
 api_router.include_router(caja.router)
+# Gastos / egresos de dinero y saldo por método de pago.
+api_router.include_router(gastos.router)
 # Rentabilidad (reportes de ganancia).
 api_router.include_router(rentabilidad.router)
 # Catálogo público (API key).

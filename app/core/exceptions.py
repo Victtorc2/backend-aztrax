@@ -296,3 +296,13 @@ class VentaNoEditableError(AppException):
 
     status_code = 409
     detail = "La venta ya no se puede modificar"
+
+
+# ---------------------------------------------------------------------------
+# Gastos / egresos de dinero
+# ---------------------------------------------------------------------------
+class GastoNotFoundError(AppException):
+    """No existe un gasto con el identificador indicado."""
+
+    status_code = 404
+    detail = "Gasto no encontrado"

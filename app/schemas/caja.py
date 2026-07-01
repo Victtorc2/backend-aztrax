@@ -70,6 +70,7 @@ class CajaResponse(BaseModel):
     ventas_efectivo: Decimal      # efectivo de ventas (no anuladas) en la sesión
     total_ingresos: Decimal       # ingresos manuales
     total_egresos: Decimal        # egresos manuales
+    gastos_efectivo: Decimal = Decimal("0.00")  # gastos en efectivo de la sesión
     monto_esperado: Decimal       # lo que debería haber en caja
     monto_declarado: Optional[Decimal]
     diferencia: Optional[Decimal]

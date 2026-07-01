@@ -32,8 +32,8 @@ def _reset_db_con_admin() -> None:
     """
     # Importar todos los modelos para que se registren en Base.metadata.
     from app.models import (  # noqa: F401
-        banner, caja, categoria, cliente, producto, proveedor, puntos, user,
-        venta,
+        banner, caja, categoria, cliente, gasto, producto, proveedor, puntos,
+        user, venta,
     )
     from app.core.security import hash_password
     from app.db.base import Base
