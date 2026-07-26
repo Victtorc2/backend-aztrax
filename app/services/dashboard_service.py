@@ -129,18 +129,37 @@ class DashboardService:
         """
         Ventas agrupadas por día en los últimos `dias` días (incluido hoy).
 
-        Se rellenan con cero los días sin ventas para que la serie sea continua
-        (mejor para graficar). El agrupado por fecha se hace en Python sobre las
-        filas del rango, que está acotado por MAX_DIAS.
+        Atajo sobre `_ventas_por_dia_rango` para la ventana que termina hoy.
         """
         dias = max(1, min(dias, self.MAX_DIAS))
         hoy = date.today()
-        desde = hoy - timedelta(days=dias - 1)
+        return self._ventas_por_dia_rango(hoy - timedelta(days=dias - 1), hoy)
+
+    def _ventas_por_dia_rango(self, desde: date, hasta: date) -> list[VentaPorDia]:
+        """
+        Ventas agrupadas por día en el rango [desde, hasta] (ambos inclusive).
+
+        Se rellenan con cero los días sin ventas para que la serie sea continua
+        (mejor para graficar). El agrupado por fecha se hace en Python sobre las
+        filas del rango, que está acotado por MAX_DIAS. Permite navegar hacia
+        meses anteriores desplazando la ventana con flechas en el frontend.
+        """
+        # Normalizar orden y acotar la amplitud a MAX_DIAS.
+        if hasta < desde:
+            desde, hasta = hasta, desde
+        span = (hasta - desde).days + 1
+        if span > self.MAX_DIAS:
+            desde = hasta - timedelta(days=self.MAX_DIAS - 1)
+            span = self.MAX_DIAS
+
         inicio = datetime.combine(desde, time.min)
+        fin = datetime.combine(hasta, time.max)
 
         filas = self.db.execute(
             select(Venta.fecha, Venta.total).where(
-                Venta.fecha >= inicio, Venta.anulada.is_(False)
+                Venta.fecha >= inicio,
+                Venta.fecha <= fin,
+                Venta.anulada.is_(False),
             )
         ).all()
 
@@ -154,7 +173,7 @@ class DashboardService:
 
         # Construir la serie continua día a día.
         serie: list[VentaPorDia] = []
-        for i in range(dias):
+        for i in range(span):
             d = desde + timedelta(days=i)
             slot = acum.get(d, {"cantidad": 0, "monto": _CERO})
             serie.append(
@@ -238,6 +257,10 @@ class DashboardService:
     # ------------------------------------------------------------------
     def resumen(self) -> ResumenDashboard:
         return self._resumen()
+
+    def ventas_por_dia(self, desde: date, hasta: date) -> list[VentaPorDia]:
+        """Serie de ventas por día en un rango arbitrario (para el gráfico)."""
+        return self._ventas_por_dia_rango(desde, hasta)
 
     def completo(self, dias: int = 14, top: int = 5) -> DashboardCompleto:
         """Agrega todas las secciones del dashboard en una sola respuesta."""

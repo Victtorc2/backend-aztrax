@@ -8,14 +8,15 @@ Endpoints (protegidos con JWT):
 Pensados para alimentar el panel de inicio del frontend.
 """
 
-from typing import Annotated
+from datetime import date, timedelta
+from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.dependencies.auth import CurrentUser, get_current_user
-from app.schemas.dashboard import DashboardCompleto, ResumenDashboard
+from app.schemas.dashboard import DashboardCompleto, ResumenDashboard, VentaPorDia
 from app.services.dashboard_service import DashboardService
 
 router = APIRouter(
@@ -49,6 +50,39 @@ def obtener_dashboard(
     - **metodos_pago**: desglose efectivo / yape.
     """
     return DashboardService(db).completo(dias=dias, top=top)
+
+
+@router.get(
+    "/ventas-por-dia",
+    response_model=list[VentaPorDia],
+    summary="Serie de ventas por día en un rango de fechas",
+)
+def obtener_ventas_por_dia(
+    db: Annotated[Session, Depends(get_db)],
+    _: CurrentUser,
+    desde: Annotated[
+        Optional[date], Query(description="Fecha inicial (YYYY-MM-DD)")
+    ] = None,
+    hasta: Annotated[
+        Optional[date], Query(description="Fecha final (YYYY-MM-DD)")
+    ] = None,
+    dias: int = Query(
+        default=30,
+        ge=1,
+        le=365,
+        description="Tamaño de la ventana si no se indica 'desde'",
+    ),
+) -> list[VentaPorDia]:
+    """
+    Serie continua de ventas por día para graficar, con navegación temporal.
+
+    Si se indican `desde`/`hasta` se usa ese rango; si faltan, se asume una
+    ventana de `dias` que termina en `hasta` (o en hoy). Los días sin ventas
+    se rellenan con cero para mantener la serie continua.
+    """
+    hasta_real = hasta or date.today()
+    desde_real = desde or (hasta_real - timedelta(days=dias - 1))
+    return DashboardService(db).ventas_por_dia(desde_real, hasta_real)
 
 
 @router.get(
