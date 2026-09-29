@@ -10,7 +10,7 @@ Las fechas se manejan con límites de día completo para evitar problemas de
 zona horaria al comparar columnas DateTime.
 """
 
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 
 from sqlalchemy import func, select
@@ -28,6 +28,8 @@ from app.schemas.dashboard import (
     VentaPorDia,
 )
 from app.utils.productos import EstadoProducto
+
+_LIMA = timezone(timedelta(hours=-5))
 
 _CERO = Decimal("0.00")
 
@@ -51,7 +53,7 @@ class DashboardService:
     # ------------------------------------------------------------------
     # Resumen (tarjetas KPI)
     # ------------------------------------------------------------------
-    def _resumen(self) -> ResumenDashboard:
+    def _resumen(self, periodo=None) -> ResumenDashboard:
         db = self.db
         hoy = date.today()
         inicio = datetime.combine(hoy, time.min)
@@ -71,11 +73,11 @@ class DashboardService:
 
         # Totales históricos (excluyen anuladas).
         ventas_total = db.scalar(
-            select(func.count()).select_from(Venta).where(Venta.anulada.is_(False))
+            select(func.count()).select_from(Venta).where(Venta.anulada.is_(False), *self._filtro(periodo))
         ) or 0
         monto_total = db.scalar(
             select(func.coalesce(func.sum(Venta.total), 0)).where(
-                Venta.anulada.is_(False)
+                Venta.anulada.is_(False), *self._filtro(periodo)
             )
         )
 
@@ -125,17 +127,21 @@ class DashboardService:
     # ------------------------------------------------------------------
     # Serie temporal: ventas por día
     # ------------------------------------------------------------------
-    def _ventas_por_dia(self, dias: int) -> list[VentaPorDia]:
+    def _ventas_por_dia(self, dias: int, periodo=None) -> list[VentaPorDia]:
         """
         Ventas agrupadas por día en los últimos `dias` días (incluido hoy).
 
         Atajo sobre `_ventas_por_dia_rango` para la ventana que termina hoy.
         """
+        if periodo:
+            desde = periodo[0].astimezone(_LIMA).date()
+            hasta = periodo[1].astimezone(_LIMA).date() - timedelta(days=1)
+            return self._ventas_por_dia_rango(desde, hasta, periodo)
         dias = max(1, min(dias, self.MAX_DIAS))
         hoy = date.today()
         return self._ventas_por_dia_rango(hoy - timedelta(days=dias - 1), hoy)
 
-    def _ventas_por_dia_rango(self, desde: date, hasta: date) -> list[VentaPorDia]:
+    def _ventas_por_dia_rango(self, desde: date, hasta: date, periodo=None) -> list[VentaPorDia]:
         """
         Ventas agrupadas por día en el rango [desde, hasta] (ambos inclusive).
 
@@ -155,10 +161,14 @@ class DashboardService:
         inicio = datetime.combine(desde, time.min)
         fin = datetime.combine(hasta, time.max)
 
+        if periodo:
+            desde = periodo[0].astimezone(_LIMA).date()
+            inicio = periodo[0]
+
         filas = self.db.execute(
             select(Venta.fecha, Venta.total).where(
                 Venta.fecha >= inicio,
-                Venta.fecha <= fin,
+                Venta.fecha < periodo[1] if periodo else Venta.fecha <= fin,
                 Venta.anulada.is_(False),
             )
         ).all()
@@ -166,6 +176,9 @@ class DashboardService:
         # Acumular por día.
         acum: dict[date, dict] = {}
         for fecha_dt, total in filas:
+            if periodo:
+                fecha_dt = fecha_dt.replace(tzinfo=timezone.utc) if fecha_dt.tzinfo is None else fecha_dt
+                fecha_dt = fecha_dt.astimezone(_LIMA)
             d = fecha_dt.date()
             slot = acum.setdefault(d, {"cantidad": 0, "monto": _CERO})
             slot["cantidad"] += 1
@@ -188,7 +201,7 @@ class DashboardService:
     # ------------------------------------------------------------------
     # Top productos más vendidos
     # ------------------------------------------------------------------
-    def _top_productos(self, limite: int) -> list[TopProducto]:
+    def _top_productos(self, limite: int, periodo=None) -> list[TopProducto]:
         """Ranking de productos por unidades vendidas (todas las ventas)."""
         limite = max(1, min(limite, 50))
         stmt = (
@@ -204,12 +217,12 @@ class DashboardService:
             )
             .join(DetalleVenta, DetalleVenta.producto_id == Producto.id)
             .join(Venta, Venta.id == DetalleVenta.venta_id)
-            .where(Venta.anulada.is_(False))
+            .where(Venta.anulada.is_(False), *self._filtro(periodo))
             .group_by(
                 Producto.id, Producto.codigo, Producto.nombre, Producto.marca,
                 Producto.modelo, Producto.color,
             )
-            .order_by(func.sum(DetalleVenta.cantidad).desc())
+            .order_by(func.sum(DetalleVenta.cantidad).desc(), Producto.id)
             .limit(limite)
         )
         filas = self.db.execute(stmt).all()
@@ -230,7 +243,7 @@ class DashboardService:
     # ------------------------------------------------------------------
     # Desglose por método de pago
     # ------------------------------------------------------------------
-    def _metodos_pago(self) -> list[MetodoPagoResumen]:
+    def _metodos_pago(self, periodo=None) -> list[MetodoPagoResumen]:
         """Cantidad de ventas y monto por método de pago."""
         stmt = (
             select(
@@ -238,7 +251,7 @@ class DashboardService:
                 func.count().label("cantidad"),
                 func.coalesce(func.sum(Venta.total), 0).label("monto"),
             )
-            .where(Venta.anulada.is_(False))
+            .where(Venta.anulada.is_(False), *self._filtro(periodo))
             .group_by(Venta.metodo_pago)
             .order_by(func.sum(Venta.total).desc())
         )
@@ -262,11 +275,21 @@ class DashboardService:
         """Serie de ventas por día en un rango arbitrario (para el gráfico)."""
         return self._ventas_por_dia_rango(desde, hasta)
 
-    def completo(self, dias: int = 14, top: int = 5) -> DashboardCompleto:
+    @staticmethod
+    def _filtro(periodo):
+        return (Venta.fecha >= periodo[0], Venta.fecha < periodo[1]) if periodo else ()
+
+    def completo(self, dias: int = 14, top: int = 5, mes: str | None = None) -> DashboardCompleto:
         """Agrega todas las secciones del dashboard en una sola respuesta."""
+        periodo = None
+        if mes:
+            anio, numero = map(int, mes.split("-"))
+            inicio = datetime(anio, numero, 1, tzinfo=_LIMA)
+            fin = datetime(anio + (numero == 12), numero % 12 + 1, 1, tzinfo=_LIMA)
+            periodo = (inicio.astimezone(timezone.utc), fin.astimezone(timezone.utc))
         return DashboardCompleto(
-            resumen=self._resumen(),
-            ventas_por_dia=self._ventas_por_dia(dias),
-            top_productos=self._top_productos(top),
-            metodos_pago=self._metodos_pago(),
+            resumen=self._resumen(periodo),
+            ventas_por_dia=self._ventas_por_dia(dias, periodo),
+            top_productos=self._top_productos(top, periodo),
+            metodos_pago=self._metodos_pago(periodo),
         )

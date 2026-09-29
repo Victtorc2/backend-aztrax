@@ -34,6 +34,10 @@ router = APIRouter(
 def obtener_dashboard(
     db: Annotated[Session, Depends(get_db)],
     _: CurrentUser,
+    mes: str | None = Query(
+        default=None, pattern=r"^(?:[1-8][0-9]{3}|9[0-9]{2}[0-8])-(0[1-9]|1[0-2])$",
+        description="Mes YYYY-MM (hora de Perú); filtra totales, gráfico y ranking",
+    ),
     dias: int = Query(
         default=14, ge=1, le=365, description="Días de la serie de ventas"
     ),
@@ -49,7 +53,7 @@ def obtener_dashboard(
     - **top_productos**: ranking por unidades vendidas.
     - **metodos_pago**: desglose efectivo / yape.
     """
-    return DashboardService(db).completo(dias=dias, top=top)
+    return DashboardService(db).completo(dias=dias, top=top, mes=mes)
 
 
 @router.get(
