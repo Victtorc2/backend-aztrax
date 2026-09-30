@@ -85,13 +85,17 @@ def listar_productos_catalogo(
         if solo_destacados:
             stmt = stmt.where(Producto.destacado.is_(True))
         if search and search.strip():
-            pattern = f"%{search.strip().lower()}%"
-            stmt = stmt.where(
-                func.lower(Producto.nombre).like(pattern)
-                | func.lower(Producto.marca).like(pattern)
-                | func.lower(Producto.modelo).like(pattern)
-                | func.lower(Producto.color).like(pattern)
-            )
+            # Cada palabra debe coincidir en algún campo; el orden no importa.
+            # contains(autoescape=True) trata % y _ como texto, no comodines.
+            for termino in dict.fromkeys(search.lower().split()):
+                stmt = stmt.where(
+                    func.lower(Producto.nombre).contains(termino, autoescape=True)
+                    | func.lower(Producto.marca).contains(termino, autoescape=True)
+                    | func.lower(Producto.modelo).contains(termino, autoescape=True)
+                    | func.lower(Producto.color).contains(termino, autoescape=True)
+                    | func.lower(Producto.codigo).contains(termino, autoescape=True)
+                    | Producto.categoria.has(func.lower(Categoria.nombre).contains(termino, autoescape=True))
+                )
         return stmt
 
     # Total de coincidencias (sin paginar) para calcular el número de páginas.
