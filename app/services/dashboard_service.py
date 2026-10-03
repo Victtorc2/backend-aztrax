@@ -13,7 +13,7 @@ zona horaria al comparar columnas DateTime.
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.models.categoria import Categoria
@@ -26,6 +26,8 @@ from app.schemas.dashboard import (
     ResumenDashboard,
     TopProducto,
     VentaPorDia,
+    VentasProducto,
+    VentasProductoPaginado,
 )
 from app.utils.productos import EstadoProducto
 
@@ -270,6 +272,43 @@ class DashboardService:
     # ------------------------------------------------------------------
     def resumen(self) -> ResumenDashboard:
         return self._resumen()
+
+    def buscar_ventas_producto(self, q: str, page: int, page_size: int) -> VentasProductoPaginado:
+        """Conteo histórico por producto, incluyendo inactivos y productos sin ventas."""
+        filtros = []
+        for palabra in q.split():
+            literal = palabra.replace("/", "//").replace("%", "/%").replace("_", "/_")
+            filtros.append(or_(*(
+                campo.ilike(f"%{literal}%", escape="/")
+                for campo in (Producto.nombre, Producto.codigo, Producto.marca, Producto.modelo, Producto.color)
+            )))
+        total = self.db.scalar(select(func.count(Producto.id)).where(*filtros)) or 0
+        productos = self.db.scalars(
+            select(Producto).where(*filtros).order_by(Producto.nombre, Producto.id)
+            .offset((page - 1) * page_size).limit(page_size)
+        ).all()
+        conteos = {}
+        if productos:
+            filas = self.db.execute(
+                select(
+                    DetalleVenta.producto_id,
+                    func.count(func.distinct(DetalleVenta.venta_id)),
+                    func.sum(DetalleVenta.cantidad),
+                )
+                .join(Venta, Venta.id == DetalleVenta.venta_id)
+                .where(Venta.anulada.is_(False), DetalleVenta.producto_id.in_([p.id for p in productos]))
+                .group_by(DetalleVenta.producto_id)
+            ).all()
+            conteos = {pid: (int(veces), int(unidades)) for pid, veces, unidades in filas}
+        return VentasProductoPaginado(
+            total=total, page=page, page_size=page_size,
+            items=[VentasProducto(
+                producto_id=p.id, codigo=p.codigo, nombre=p.nombre, marca=p.marca,
+                modelo=p.modelo, color=p.color, activo=p.is_active,
+                veces_vendido=conteos.get(p.id, (0, 0))[0],
+                unidades_vendidas=conteos.get(p.id, (0, 0))[1],
+            ) for p in productos],
+        )
 
     def ventas_por_dia(self, desde: date, hasta: date) -> list[VentaPorDia]:
         """Serie de ventas por día en un rango arbitrario (para el gráfico)."""

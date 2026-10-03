@@ -63,6 +63,25 @@ class MetodoPagoResumen(BaseModel):
     monto: Decimal
 
 
+class VentasProducto(BaseModel):
+    producto_id: int
+    codigo: str
+    nombre: str
+    marca: str
+    modelo: Optional[str] = None
+    color: Optional[str] = None
+    activo: bool
+    veces_vendido: int
+    unidades_vendidas: int
+
+
+class VentasProductoPaginado(BaseModel):
+    total: int
+    page: int
+    page_size: int
+    items: list[VentasProducto]
+
+
 class DashboardCompleto(BaseModel):
     """Respuesta agregada con todo lo necesario para pintar el dashboard."""
 

@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.dependencies.auth import CurrentUser, get_current_user
-from app.schemas.dashboard import DashboardCompleto, ResumenDashboard, VentaPorDia
+from app.schemas.dashboard import DashboardCompleto, ResumenDashboard, VentaPorDia, VentasProductoPaginado
 from app.services.dashboard_service import DashboardService
 
 router = APIRouter(
@@ -24,6 +24,18 @@ router = APIRouter(
     tags=["Dashboard"],
     dependencies=[Depends(get_current_user)],
 )
+
+
+@router.get("/ventas-por-producto", response_model=VentasProductoPaginado)
+def buscar_ventas_producto(
+    db: Annotated[Session, Depends(get_db)],
+    _: CurrentUser,
+    q: str = Query(default="", max_length=150),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+) -> VentasProductoPaginado:
+    """Busca productos y cuenta boletas distintas y unidades; excluye anuladas."""
+    return DashboardService(db).buscar_ventas_producto(q, page, page_size)
 
 
 @router.get(
