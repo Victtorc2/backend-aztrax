@@ -8,7 +8,7 @@ Incluye:
 - BoletaResponse: metadatos de la boleta generada.
 """
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
 from typing import TYPE_CHECKING, Optional
@@ -103,6 +103,9 @@ class VentaCreate(BaseModel):
     con el cliente que queda debiendo. El saldo inicial será el total.
     """
 
+    fecha: Optional[date] = Field(
+        default=None, description="Fecha de la boleta: hoy o hasta 4 días antes (Perú)."
+    )
     items: list[VentaItemCreate] = Field(..., min_length=1)
     descuento: Decimal = Field(default=Decimal("0"), ge=0, max_digits=12, decimal_places=2)
     descuento_tipo: Optional[DescuentoTipo] = Field(default=None)

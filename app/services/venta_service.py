@@ -11,7 +11,7 @@ Responsabilidades:
 No conoce FastAPI: lanza excepciones de dominio que la API traduce a HTTP.
 """
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Optional, Sequence
 
@@ -75,6 +75,19 @@ class VentaService:
         if not data.items:
             raise VentaInvalidaError("La venta debe incluir al menos un producto")
 
+        # Validar antes de crear clientes, consumir correlativos o modificar stock.
+        ahora = datetime.now(timezone.utc)
+        hoy = ahora.astimezone(timezone(timedelta(hours=-5))).date()
+        if data.fecha is not None and not hoy - timedelta(days=4) <= data.fecha <= hoy:
+            raise VentaInvalidaError(
+                "La fecha de la boleta debe estar entre hoy y 4 días anteriores (hora de Perú)"
+            )
+        # Conservar el formato de fecha/hora sin zona usado por historial y PDF.
+        fecha = (
+            datetime.combine(data.fecha, ahora.time().replace(tzinfo=None))
+            if data.fecha is not None else None
+        )
+
         subtotal, detalles, productos_cant = self._construir_lineas(data.items)
 
         descuento_aplicado = self._calcular_descuento(
@@ -122,6 +135,7 @@ class VentaService:
             tipo_pago=data.tipo_pago.value,
             cliente_id=cliente_id,
             saldo_pendiente=saldo_pendiente,
+            fecha=fecha,
         )
 
         # Descontar stock y recalcular estado (reutiliza la regla de Fase 5).

@@ -65,6 +65,7 @@ class VentaRepository:
         tipo_pago: str = "contado",
         cliente_id: Optional[int] = None,
         saldo_pendiente: Decimal = Decimal("0.00"),
+        fecha: Optional[datetime] = None,
     ) -> Venta:
         """
         Crea una venta junto con sus líneas de detalle.
@@ -98,6 +99,8 @@ class VentaRepository:
                 for d in detalles
             ],
         )
+        if fecha is not None:
+            venta.fecha = fecha
         self.db.add(venta)
         self.db.commit()
         return self.get_by_id(venta.id)  # type: ignore[return-value]
